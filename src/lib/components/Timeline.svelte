@@ -179,7 +179,7 @@
     const clipText = new Konva.Text({
       x: clipX + 8,
       y: trackY + 15,
-      text: `Clip ${clip.id.substring(0, 8)}`,
+      text: clip.name || `Clip ${clip.id.substring(0, 8)}`,  // Use filename if available, fallback to ID
       fontSize: 12,
       fill: '#ffffff',
       listening: false,

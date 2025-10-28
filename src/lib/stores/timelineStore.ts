@@ -25,6 +25,7 @@ export interface Track {
 export interface Clip {
     id: string;
     media_file_id: string;
+    name?: string;           // Display name (typically filename)
     track_position: number;  // Start time in seconds
     duration: number;        // Clip duration in seconds
     trim_start: number;      // Trim from source start
@@ -262,33 +263,33 @@ export function selectClip(clipId: string | null) {
  * Add a media file to the timeline (creates a Clip from MediaFile)
  */
 export async function addMediaFileToTimeline(
-    mediaFile: { id: string; duration: number },
+    mediaFile: { id: string; duration: number; filename: string; codec: { video: string; audio: string } },
     trackId?: string,
     position?: number
 ): Promise<void> {
-    // Generate unique clip ID
-    const clipId = `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Get current timeline to find default track
+    // Get current timeline to find tracks
     const currentTimeline = await getTimelineState();
 
-    // Use provided trackId or find first video track
-    let targetTrackId = trackId;
-    if (!targetTrackId) {
-        const videoTrack = currentTimeline.tracks.find(t => t.track_type === 'Video');
-        if (!videoTrack) {
-            throw new Error('No video track found in timeline');
-        }
-        targetTrackId = videoTrack.id;
+    // Find video and audio tracks
+    const videoTrack = currentTimeline.tracks.find(t => t.track_type === 'Video');
+    const audioTrack = currentTimeline.tracks.find(t => t.track_type === 'Audio');
+
+    if (!videoTrack) {
+        throw new Error('No video track found in timeline');
     }
+
+    // Use provided trackId or default to video track
+    const targetVideoTrackId = trackId || videoTrack.id;
 
     // Calculate position (default to end of timeline)
     const targetPosition = position ?? currentTimeline.duration;
 
-    // Create clip from media file
-    const clip: Clip = {
-        id: clipId,
+    // Create video clip from media file
+    const videoClipId = `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const videoClip: Clip = {
+        id: videoClipId,
         media_file_id: mediaFile.id,
+        name: mediaFile.filename,  // Include filename for display
         track_position: targetPosition,
         duration: mediaFile.duration,
         trim_start: 0,
@@ -298,8 +299,29 @@ export async function addMediaFileToTimeline(
         speed: 1.0,
     };
 
-    // Use existing addClipToTrack function (already has backend sync)
-    await addClipToTrack(targetTrackId, clip);
+    // Add video clip to video track
+    await addClipToTrack(targetVideoTrackId, videoClip);
+
+    // If media has audio (check if audio codec is not empty/none), create audio clip on audio track
+    const hasAudio = mediaFile.codec.audio && mediaFile.codec.audio.toLowerCase() !== 'none';
+    if (hasAudio && audioTrack) {
+        const audioClipId = `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}-audio`;
+        const audioClip: Clip = {
+            id: audioClipId,
+            media_file_id: mediaFile.id,
+            name: `${mediaFile.filename} (audio)`,  // Include filename for display
+            track_position: targetPosition,
+            duration: mediaFile.duration,
+            trim_start: 0,
+            trim_end: mediaFile.duration,
+            effects: [],
+            volume: 1.0,
+            speed: 1.0,
+        };
+
+        // Add audio clip to audio track
+        await addClipToTrack(audioTrack.id, audioClip);
+    }
 }
 
 /**

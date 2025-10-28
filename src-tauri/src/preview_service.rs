@@ -296,6 +296,7 @@ mod tests {
                     Clip {
                         id: "clip1".to_string(),
                         media_file_id: "media1".to_string(),
+                        name: Some("test-clip1.mp4".to_string()),
                         track_position: 0.0,
                         duration: 10.0,
                         trim_start: 0.0,
@@ -307,6 +308,7 @@ mod tests {
                     Clip {
                         id: "clip2".to_string(),
                         media_file_id: "media2".to_string(),
+                        name: Some("test-clip2.mp4".to_string()),
                         track_position: 10.0,
                         duration: 10.0,
                         trim_start: 0.0,

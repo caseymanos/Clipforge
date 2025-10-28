@@ -128,6 +128,7 @@ pub enum TrackType {
 pub struct Clip {
     pub id: String,
     pub media_file_id: String,
+    pub name: Option<String>,  // Display name (typically filename)
     pub track_position: f64,  // Position on timeline in seconds
     pub duration: f64,  // Duration in seconds (can differ from source if trimmed)
     pub trim_start: f64,  // Trim from start of source in seconds
