@@ -34,10 +34,23 @@ export interface Clip {
     speed: number;
 }
 
+// Effect structure matching backend models.rs
 export interface Effect {
-    effect_type: 'Brightness' | 'Contrast' | 'Saturation' | 'Blur' | 'FadeIn' | 'FadeOut';
-    intensity: number;
+    id: string;
+    effect_type: EffectType;
+    enabled: boolean;
 }
+
+// EffectType enum matching backend (tagged union)
+export type EffectType =
+    | { type: 'Brightness'; value: number }
+    | { type: 'Contrast'; value: number }
+    | { type: 'Saturation'; value: number }
+    | { type: 'Blur'; radius: number }
+    | { type: 'Sharpen'; amount: number }
+    | { type: 'Normalize' }
+    | { type: 'FadeIn'; duration: number }
+    | { type: 'FadeOut'; duration: number };
 
 // Timeline state
 export const timelineStore = writable<Timeline>({
@@ -300,7 +313,7 @@ export async function initializeTimeline(): Promise<void> {
         console.error('Failed to load timeline from backend:', error);
         // If no timeline exists, create one
         try {
-            await invoke('create_timeline');
+            await invoke('create_timeline', { name: 'Untitled Timeline' });
             const newTimeline = await invoke<Timeline>('get_current_timeline');
             timelineStore.set(newTimeline);
         } catch (createError) {

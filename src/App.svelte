@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { save, open } from "@tauri-apps/plugin-dialog";
   import Timeline from "./lib/components/Timeline.svelte";
   import VideoPreview from "./lib/components/VideoPreview.svelte";
   import MediaLibrary from "./lib/components/MediaLibrary.svelte";
-  import { initializeTimeline } from "./lib/stores/timelineStore";
+  import { initializeTimeline, saveTimelineProject, loadTimelineProject } from "./lib/stores/timelineStore";
 
   let appVersion = "";
+  let statusMessage = "";
 
   onMount(async () => {
     appVersion = await invoke("get_app_version");
@@ -19,6 +21,50 @@
       console.error("Failed to initialize timeline:", error);
     }
   });
+
+  async function handleSaveProject() {
+    try {
+      const filePath = await save({
+        defaultPath: 'untitled-project.cfp',
+        filters: [{
+          name: 'ClipForge Project',
+          extensions: ['cfp']
+        }]
+      });
+
+      if (filePath) {
+        await saveTimelineProject(filePath);
+        statusMessage = `Project saved to ${filePath}`;
+        setTimeout(() => statusMessage = "", 3000);
+      }
+    } catch (error) {
+      console.error("Failed to save project:", error);
+      statusMessage = "Failed to save project";
+      setTimeout(() => statusMessage = "", 3000);
+    }
+  }
+
+  async function handleLoadProject() {
+    try {
+      const filePath = await open({
+        multiple: false,
+        filters: [{
+          name: 'ClipForge Project',
+          extensions: ['cfp']
+        }]
+      });
+
+      if (filePath && typeof filePath === 'string') {
+        await loadTimelineProject(filePath);
+        statusMessage = `Project loaded from ${filePath}`;
+        setTimeout(() => statusMessage = "", 3000);
+      }
+    } catch (error) {
+      console.error("Failed to load project:", error);
+      statusMessage = "Failed to load project";
+      setTimeout(() => statusMessage = "", 3000);
+    }
+  }
 </script>
 
 <main class="container">
@@ -41,15 +87,26 @@
     <p class="description">
       Real-time preview window with frame-by-frame rendering. Scrub the timeline to see the preview update!
     </p>
-    <VideoPreview width={854} height={480} />
+    <VideoPreview />
   </section>
 
   <section class="timeline-section">
-    <h2>Timeline Editor</h2>
-    <p class="description">
-      Canvas-based timeline with Konva.js. Try dragging clips, resizing them, zooming with mouse wheel,
-      and dragging the playhead!
-    </p>
+    <div class="timeline-header">
+      <div>
+        <h2>Timeline Editor</h2>
+        <p class="description">
+          Canvas-based timeline with Konva.js. Try dragging clips, resizing them, zooming with mouse wheel,
+          and dragging the playhead!
+        </p>
+      </div>
+      <div class="project-controls">
+        <button class="btn-save" on:click={handleSaveProject}>Save Project</button>
+        <button class="btn-load" on:click={handleLoadProject}>Load Project</button>
+      </div>
+    </div>
+    {#if statusMessage}
+      <div class="status-message">{statusMessage}</div>
+    {/if}
 
     <Timeline width={1200} height={400} />
   </section>
@@ -275,5 +332,56 @@
   .architecture {
     font-size: 0.85rem;
     color: #555;
+  }
+
+  /* Timeline header with project controls */
+  .timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+  }
+
+  .project-controls {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .project-controls button {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .btn-save {
+    background: #667eea;
+    color: white;
+  }
+
+  .btn-save:hover {
+    background: #5568d3;
+  }
+
+  .btn-load {
+    background: #48bb78;
+    color: white;
+  }
+
+  .btn-load:hover {
+    background: #38a169;
+  }
+
+  .status-message {
+    background: #1a1a1a;
+    border: 1px solid #667eea;
+    border-radius: 0.375rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    color: #aaa;
+    font-size: 0.9rem;
   }
 </style>
