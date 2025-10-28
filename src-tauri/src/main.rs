@@ -31,6 +31,12 @@ mod recording;
 mod timeline;
 mod timeline_commands;
 
+// Module 6: Export & Rendering
+// TEMPORARILY DISABLED - needs ExportSettings/ExportProgress/ExportError types in models.rs
+// and needs to be updated to use 'muted' field and new EffectType enum
+// mod export;
+// mod export_commands;
+
 // Module 8: Video Preview
 mod preview_cache;
 mod preview_service;
@@ -42,7 +48,11 @@ use ffmpeg::FFmpegService;
 use commands::recording_commands::RecordingService;
 use timeline::TimelineService;
 use timeline_commands::TimelineServiceState;
+// TEMPORARILY DISABLED - export module has compilation errors
+// use export::ExportService;
+// use export_commands::ExportServiceState;
 use preview_service::PreviewService;
+use models::Resolution;
 
 fn main() {
     // Initialize logging
@@ -70,11 +80,35 @@ fn main() {
             // Module 4: Initialize Recording service
             let recording_service = RecordingService::new();
 
-            // Module 5: Initialize Timeline service
-            let timeline_service = TimelineService::new();
+            // Module 5: Initialize Timeline service with default timeline
+            let mut timeline_service = TimelineService::new();
+
+            // Create default timeline so app starts with a ready-to-use timeline
+            let default_resolution = Resolution {
+                width: 1920,
+                height: 1080,
+            };
+
+            if let Err(e) = timeline_service.create_timeline(
+                "Default Timeline".to_string(),
+                30.0,
+                default_resolution,
+            ) {
+                eprintln!("Warning: Failed to create default timeline: {}", e);
+            }
+
             let timeline_state = TimelineServiceState {
                 service: Arc::new(Mutex::new(timeline_service)),
             };
+
+            // Module 6: TEMPORARILY DISABLED - Export service has compilation errors
+            // Needs ExportSettings/ExportProgress/ExportError types added to models.rs
+            // Also needs to be updated for 'muted' field and new EffectType enum
+            // let export_service = ExportService::new()
+            //     .expect("Failed to initialize export service");
+            // let export_state = ExportServiceState {
+            //     service: Arc::new(Mutex::new(export_service)),
+            // };
 
             // Module 8: Initialize Preview service
             let preview_service = Arc::new(Mutex::new(PreviewService::new()));
@@ -83,6 +117,7 @@ fn main() {
             app.manage(ffmpeg_service);
             app.manage(recording_service);
             app.manage(timeline_state);
+            // app.manage(export_state);  // Temporarily disabled
             app.manage(preview_service);
 
             log::info!("ClipForge initialized successfully");
@@ -132,6 +167,10 @@ fn main() {
             timeline_commands::get_clips_at_playhead,
             timeline_commands::save_timeline_project,
             timeline_commands::load_timeline_project,
+            // Module 6 commands - TEMPORARILY DISABLED
+            // export_commands::export_timeline,
+            // export_commands::cancel_export,
+            // export_commands::get_export_presets,
             // Module 8 commands
             commands::render_preview_frame,
             commands::clear_preview_cache,

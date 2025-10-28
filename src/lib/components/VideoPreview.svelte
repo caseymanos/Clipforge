@@ -25,6 +25,7 @@
   let previewImage = '';
   let isComposite = false;
   let animationFrameId: number;
+  let pendingFrameRequest: object | null = null;
 
   // Determine if we need composite rendering
   $: {
@@ -57,17 +58,34 @@
   }
 
   async function renderFrame(time: number) {
-    try {
-      const base64Image = await invoke<string>('render_preview_frame', {
-        timeline,
-        time,
-        mediaFiles,
-      });
+    // Cancel any pending frame request to avoid race conditions
+    pendingFrameRequest = null;
 
-      previewImage = `data:image/jpeg;base64,${base64Image}`;
-    } catch (error) {
-      console.error('Failed to render preview frame:', error);
-    }
+    // Create unique request ID for tracking
+    const requestId = {};
+    const frameRequest = (async () => {
+      try {
+        const base64Image = await invoke<string>('render_preview_frame', {
+          timeline,
+          time,
+          mediaFiles,
+        });
+
+        // Only update if this request is still pending
+        if (pendingFrameRequest === requestId) {
+          previewImage = `data:image/jpeg;base64,${base64Image}`;
+          pendingFrameRequest = null;
+        }
+      } catch (error) {
+        console.error('Failed to render preview frame:', error);
+        if (pendingFrameRequest === requestId) {
+          pendingFrameRequest = null;
+        }
+      }
+    })();
+
+    pendingFrameRequest = requestId;
+    await frameRequest;
   }
 
   function play() {
@@ -75,14 +93,17 @@
     const startTime = performance.now();
     const initialTime = currentTime;
 
-    function animate(currentAnimTime: number) {
+    async function animate(currentAnimTime: number) {
       if (!isPlaying) return;
 
       const elapsed = (currentAnimTime - startTime) / 1000;
       currentTime = Math.min(initialTime + elapsed * playbackSpeed, duration);
 
       if (isComposite) {
-        renderFrame(currentTime);
+        // Fire-and-forget: renderFrame manages its own race conditions
+        renderFrame(currentTime).catch(err =>
+          console.error('Frame render failed:', err)
+        );
       }
 
       if (currentTime >= duration) {

@@ -311,9 +311,14 @@ export async function initializeTimeline(): Promise<void> {
         timelineStore.set(timeline);
     } catch (error) {
         console.error('Failed to load timeline from backend:', error);
-        // If no timeline exists, create one
+        // If no timeline exists, create one with default settings
         try {
-            await invoke('create_timeline', { name: 'Untitled Timeline' });
+            await invoke('create_timeline', {
+                name: 'Untitled Timeline',
+                framerate: 30.0,
+                width: 1920,
+                height: 1080
+            });
             const newTimeline = await invoke<Timeline>('get_current_timeline');
             timelineStore.set(newTimeline);
         } catch (createError) {
