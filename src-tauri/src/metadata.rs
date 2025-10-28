@@ -1,0 +1,115 @@
+use std::path::Path;
+use std::process::Command;
+use serde_json::Value;
+use crate::models::{FileMetadata, Resolution, VideoCodec, MetadataError};
+
+/// Extract video metadata using FFprobe
+pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError> {
+    let output = Command::new("ffprobe")
+        .args(&[
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_streams",
+            "-show_format",
+            path.to_str().unwrap(),
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        log::error!("FFprobe failed for file: {:?}", path);
+        return Err(MetadataError::FFprobeError);
+    }
+
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+
+    // Extract video stream info
+    let streams = json["streams"]
+        .as_array()
+        .ok_or(MetadataError::FFprobeError)?;
+
+    let video_stream = streams
+        .iter()
+        .find(|s| s["codec_type"] == "video")
+        .ok_or(MetadataError::NoVideoStream)?;
+
+    let audio_stream = streams
+        .iter()
+        .find(|s| s["codec_type"] == "audio");
+
+    let format = &json["format"];
+
+    // Parse duration
+    let duration = format["duration"]
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+
+    // Parse resolution
+    let width = video_stream["width"]
+        .as_u64()
+        .unwrap_or(0) as u32;
+    let height = video_stream["height"]
+        .as_u64()
+        .unwrap_or(0) as u32;
+
+    // Parse codecs
+    let video_codec = video_stream["codec_name"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+
+    let audio_codec = audio_stream
+        .and_then(|s| s["codec_name"].as_str())
+        .unwrap_or("none")
+        .to_string();
+
+    // Parse bitrate
+    let bitrate = format["bit_rate"]
+        .as_str()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    // Parse framerate
+    let framerate = video_stream["r_frame_rate"]
+        .as_str()
+        .map(parse_framerate)
+        .unwrap_or(30.0);
+
+    Ok(FileMetadata {
+        duration,
+        resolution: Resolution { width, height },
+        codec: VideoCodec {
+            video: video_codec,
+            audio: audio_codec,
+        },
+        bitrate,
+        framerate,
+        has_audio: audio_stream.is_some(),
+    })
+}
+
+/// Parse framerate string like "30/1" or "24000/1001"
+fn parse_framerate(fps_str: &str) -> f64 {
+    let parts: Vec<&str> = fps_str.split('/').collect();
+    if parts.len() == 2 {
+        let num: f64 = parts[0].parse().unwrap_or(30.0);
+        let den: f64 = parts[1].parse().unwrap_or(1.0);
+        if den != 0.0 {
+            return num / den;
+        }
+    }
+    30.0 // Default fallback
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_framerate() {
+        assert_eq!(parse_framerate("30/1"), 30.0);
+        assert_eq!(parse_framerate("60/1"), 60.0);
+        // 23.976 fps (common for film)
+        assert!((parse_framerate("24000/1001") - 23.976).abs() < 0.001);
+    }
+}
