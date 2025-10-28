@@ -1,0 +1,46 @@
+```mermaid
+graph TB
+    subgraph "Timeline State"
+        Timeline[Timeline Object<br/>id, name, framerate]
+        Track1[Track 1: Video]
+        Track2[Track 2: Audio]
+        Track3[Track 3: Overlay]
+    end
+    
+    subgraph "Clips on Track 1"
+        Clip1[Clip A<br/>0s - 10s]
+        Clip2[Clip B<br/>10s - 25s]
+        Clip3[Clip C<br/>25s - 40s]
+    end
+    
+    subgraph "Clip Properties"
+        TrimStart[trim_start: 5.0s]
+        TrimEnd[trim_end: 15.0s]
+        Position[track_position: 10.0s]
+        Effects[effects: brightness]
+        Speed[speed: 1.0x]
+    end
+    
+    Timeline --> Track1
+    Timeline --> Track2
+    Timeline --> Track3
+    
+    Track1 --> Clip1
+    Track1 --> Clip2
+    Track1 --> Clip3
+    
+    Clip2 --> TrimStart
+    Clip2 --> TrimEnd
+    Clip2 --> Position
+    Clip2 --> Effects
+    Clip2 --> Speed
+    
+    style Timeline fill:#667eea
+    style Track1 fill:#3b82f6
+    style Clip2 fill:#10b981
+```
+
+**Non-Destructive Editing:**
+- Original files never modified
+- All edits stored in Timeline state
+- Can create multiple versions from same source

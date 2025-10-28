@@ -1,0 +1,36 @@
+```mermaid
+graph TB
+    subgraph "Application Layer"
+        FS[FileService]
+    end
+    
+    subgraph "Caching Strategy"
+        Cache[HashMap Cache<br/>Optional Phase 7-8]
+    end
+    
+    subgraph "Persistent Storage"
+        DB[(SQLite Database)]
+        Files[File System]
+    end
+    
+    subgraph "Database Tables"
+        MediaFiles[media_files table]
+        Indexes[hash, path indexes]
+    end
+    
+    FS -->|1. Check cache first| Cache
+    Cache -->|2. Cache miss| DB
+    FS -->|3. Write-through| DB
+    DB --> MediaFiles
+    MediaFiles --> Indexes
+    FS --> Files
+    
+    style Cache fill:#fbbf24,stroke:#f59e0b,stroke-width:2px,stroke-dasharray: 5 5
+    style DB fill:#10b981
+    style Files fill:#10b981
+```
+
+**Notes:**
+- Dashed box = Optional cache (add only if profiling shows need)
+- Solid boxes = Required components
+- Flow: Check cache → Check DB → Load from disk

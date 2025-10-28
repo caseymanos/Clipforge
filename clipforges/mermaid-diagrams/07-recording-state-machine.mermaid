@@ -1,0 +1,28 @@
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    
+    Idle --> ListingSources: User clicks Record
+    ListingSources --> SourceSelection: Display screens/windows
+    SourceSelection --> RequestingPermission: User selects source
+    
+    RequestingPermission --> PermissionGranted: OS grants access
+    RequestingPermission --> PermissionDenied: OS denies access
+    
+    PermissionDenied --> Idle: Show error
+    
+    PermissionGranted --> Recording: Start capture
+    Recording --> Recording: Write frames to disk
+    Recording --> Stopping: User clicks Stop
+    
+    Stopping --> Finalizing: Close file handle
+    Finalizing --> Importing: Auto-import to library
+    Importing --> Idle: Ready for editing
+    
+    note right of Recording
+        Platform-specific:
+        - macOS: AVFoundation
+        - Windows: Graphics.Capture
+        - Linux: GStreamer
+    end note
+```

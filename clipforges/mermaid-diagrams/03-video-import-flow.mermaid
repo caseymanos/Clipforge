@@ -1,0 +1,32 @@
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant Tauri
+    participant FileService
+    participant FFprobe
+    participant SQLite
+    participant Thumbnail
+    
+    User->>Frontend: Drop video file
+    Frontend->>Tauri: invoke('import_media_file')
+    Tauri->>FileService: import_file(path)
+    
+    FileService->>FileService: calculate_hash()
+    FileService->>SQLite: find_by_hash()
+    
+    alt File already exists
+        SQLite-->>FileService: Return existing MediaFile
+        FileService-->>Tauri: MediaFile
+        Tauri-->>Frontend: Success
+    else New file
+        FileService->>FFprobe: Extract metadata
+        FFprobe-->>FileService: VideoMetadata
+        FileService->>Thumbnail: Generate thumbnail
+        Thumbnail-->>FileService: thumbnail.jpg
+        FileService->>SQLite: INSERT media_file
+        FileService-->>Tauri: MediaFile
+        Tauri-->>Frontend: Success
+        Frontend->>Frontend: Update media library UI
+    end
+```

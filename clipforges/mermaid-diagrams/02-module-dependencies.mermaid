@@ -1,0 +1,36 @@
+```mermaid
+graph LR
+    M1[Module 1:<br/>Application Shell]
+    M2[Module 2:<br/>File System]
+    M3[Module 3:<br/>FFmpeg]
+    M4[Module 4:<br/>Screen Recording]
+    M5[Module 5:<br/>Timeline Engine]
+    M6[Module 6:<br/>Export]
+    M7[Module 7:<br/>Timeline UI]
+    M8[Module 8:<br/>Video Preview]
+    
+    M1 --> M2
+    M1 --> M4
+    M1 --> M7
+    M1 --> M8
+    M2 --> M3
+    M2 --> M5
+    M3 --> M6
+    M5 --> M6
+    M5 --> M7
+    M5 --> M8
+    
+    style M1 fill:#10b981,color:#000
+    style M2 fill:#10b981,color:#000
+    style M3 fill:#10b981,color:#000
+    style M5 fill:#10b981,color:#000
+    style M4 fill:#f59e0b,color:#000
+    style M6 fill:#f59e0b,color:#000
+    style M7 fill:#3b82f6,color:#fff
+    style M8 fill:#3b82f6,color:#fff
+```
+
+**Legend:**
+- 🟢 Green: Phase 1 (Weeks 1-2) - Foundation
+- 🔵 Blue: Phase 2 (Weeks 3-4) - Core Editing
+- 🟠 Orange: Phase 3 (Weeks 5-6) - Recording & Export

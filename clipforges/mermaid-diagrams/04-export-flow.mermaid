@@ -1,0 +1,34 @@
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant Tauri
+    participant ExportEngine
+    participant TimelineEngine
+    participant FFmpeg
+    participant FileSystem
+    
+    User->>Frontend: Click Export
+    Frontend->>Tauri: invoke('export_timeline')
+    Tauri->>ExportEngine: export(timeline, settings)
+    
+    ExportEngine->>TimelineEngine: Validate timeline
+    TimelineEngine-->>ExportEngine: Valid
+    
+    ExportEngine->>ExportEngine: Build FFmpeg command
+    Note over ExportEngine: filter_complex for<br/>multi-clip composition
+    
+    ExportEngine->>FFmpeg: Spawn process
+    
+    loop Progress updates
+        FFmpeg->>ExportEngine: Parse stderr
+        ExportEngine->>Tauri: emit('export-progress')
+        Tauri->>Frontend: Update progress bar
+    end
+    
+    FFmpeg->>FileSystem: Write output.mp4
+    FFmpeg-->>ExportEngine: Exit success
+    ExportEngine->>Tauri: emit('export-complete')
+    Tauri->>Frontend: Show success notification
+    Frontend->>User: Open file location
+```

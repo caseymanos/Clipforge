@@ -1,0 +1,61 @@
+```mermaid
+graph TB
+    subgraph "Frontend Layer (Svelte)"
+        UI[User Interface]
+        Timeline[Timeline Editor]
+        Preview[Video Preview]
+        MediaLib[Media Library]
+        Controls[Playback Controls]
+    end
+    
+    subgraph "IPC Layer (Tauri)"
+        Commands[Tauri Commands]
+        Events[Event System]
+        Protocol[stream:// Protocol]
+    end
+    
+    subgraph "Backend Layer (Rust)"
+        AppShell[Application Shell]
+        FileService[File Service]
+        FFmpeg[FFmpeg Integration]
+        TimelineEngine[Timeline Engine]
+        Recording[Screen Recording]
+        Export[Export Engine]
+    end
+    
+    subgraph "Data Layer"
+        SQLite[(SQLite DB)]
+        FileSystem[File System]
+        Cache[In-Memory Cache]
+    end
+    
+    UI --> Commands
+    Timeline --> Commands
+    Preview --> Protocol
+    MediaLib --> Commands
+    Controls --> Events
+    
+    Commands --> AppShell
+    Commands --> FileService
+    Commands --> FFmpeg
+    Commands --> TimelineEngine
+    Commands --> Recording
+    Commands --> Export
+    
+    Events --> UI
+    Protocol --> FileSystem
+    
+    FileService --> SQLite
+    FileService --> Cache
+    FileService --> FileSystem
+    TimelineEngine --> SQLite
+    FFmpeg --> FileSystem
+    Export --> FFmpeg
+    
+    style UI fill:#667eea
+    style Timeline fill:#667eea
+    style Preview fill:#667eea
+    style SQLite fill:#fbbf24
+    style FileSystem fill:#fbbf24
+    style Cache fill:#fbbf24
+```
