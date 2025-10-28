@@ -31,6 +31,10 @@ mod recording;
 mod timeline;
 mod timeline_commands;
 
+// Module 8: Video Preview
+mod preview_cache;
+mod preview_service;
+
 use database::Database;
 use thumbnail::ThumbnailGenerator;
 use file_service::FileService;
@@ -38,6 +42,7 @@ use ffmpeg::FFmpegService;
 use commands::recording_commands::RecordingService;
 use timeline::TimelineService;
 use timeline_commands::TimelineServiceState;
+use preview_service::PreviewService;
 
 fn main() {
     // Initialize logging
@@ -69,10 +74,14 @@ fn main() {
                 service: Arc::new(Mutex::new(timeline_service)),
             };
 
+            // Module 8: Initialize Preview service
+            let preview_service = Arc::new(Mutex::new(PreviewService::new()));
+
             app.manage(file_service);
             app.manage(ffmpeg_service);
             app.manage(recording_service);
             app.manage(timeline_state);
+            app.manage(preview_service);
 
             log::info!("ClipForge initialized successfully");
 
@@ -121,6 +130,10 @@ fn main() {
             timeline_commands::get_clips_at_playhead,
             timeline_commands::save_timeline_project,
             timeline_commands::load_timeline_project,
+            // Module 8 commands
+            commands::render_preview_frame,
+            commands::clear_preview_cache,
+            commands::get_cache_stats,
         ])
         // Handle window events
         .on_window_event(|window, event| if let tauri::WindowEvent::CloseRequested { .. } = event {

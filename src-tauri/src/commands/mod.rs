@@ -9,10 +9,14 @@ pub mod ffmpeg_commands;
 // Module 4: Recording commands
 pub mod recording_commands;
 
+// Module 8: Preview commands
+pub mod preview_commands;
+
 // Re-export commands for convenience
 pub use file_commands::*;
 pub use ffmpeg_commands::*;
 pub use recording_commands::*;
+pub use preview_commands::*;
 
 /// Get the application version from Cargo.toml
 #[tauri::command]

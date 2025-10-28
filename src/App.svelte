@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import Timeline from "./lib/components/Timeline.svelte";
+  import VideoPreview from "./lib/components/VideoPreview.svelte";
   import { timelineStore, addClipToTrack, type Clip } from "./lib/stores/timelineStore";
 
   let appVersion = "";
@@ -75,9 +76,17 @@
 <main class="container">
   <header>
     <h1>ClipForge</h1>
-    <p class="subtitle">Desktop Video Editor - Module 7: Timeline UI</p>
+    <p class="subtitle">Desktop Video Editor - Modules 5-8: Timeline + Preview</p>
     <p class="version">Version {appVersion}</p>
   </header>
+
+  <section class="preview-section">
+    <h2>Video Preview</h2>
+    <p class="description">
+      Real-time preview window with frame-by-frame rendering. Scrub the timeline to see the preview update!
+    </p>
+    <VideoPreview width={854} height={480} />
+  </section>
 
   <section class="timeline-section">
     <h2>Timeline Editor</h2>
@@ -90,7 +99,7 @@
   </section>
 
   <section class="features">
-    <h3>Module 7 Features Implemented</h3>
+    <h3>Modules 5-8 Features Implemented</h3>
     <div class="feature-grid">
       <div class="feature">
         <h4>✅ Canvas Rendering</h4>

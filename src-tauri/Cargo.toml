@@ -44,6 +44,10 @@ which = "6.0"
 # Module 4: Screen Recording
 async-trait = "0.1"
 
+# Module 8: Video Preview (LRU cache for preview frames)
+lru = "0.12"
+base64 = "0.22"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
