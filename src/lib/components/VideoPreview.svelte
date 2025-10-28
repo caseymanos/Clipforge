@@ -10,8 +10,15 @@
 
   // Subscribe to stores for reactivity
   $: timeline = $timelineStore;
+
+  // Keep raw file paths for backend FFmpeg commands
   $: mediaFiles = $mediaLibraryStore.reduce((acc, file) => {
-    // Convert file paths to Tauri's custom protocol URLs
+    acc[file.id] = file.path;  // Keep original filesystem path
+    return acc;
+  }, {} as Record<string, string>);
+
+  // Convert file paths to Tauri asset protocol URLs for HTML5 video playback
+  $: mediaFileSrcs = $mediaLibraryStore.reduce((acc, file) => {
     acc[file.id] = convertFileSrc(file.path);
     return acc;
   }, {} as Record<string, string>);
@@ -90,37 +97,45 @@
 
   function play() {
     isPlaying = true;
-    const startTime = performance.now();
-    const initialTime = currentTime;
 
-    async function animate(currentAnimTime: number) {
-      if (!isPlaying) return;
+    if (isComposite) {
+      // Composite mode: use animation frame loop
+      const startTime = performance.now();
+      const initialTime = currentTime;
 
-      const elapsed = (currentAnimTime - startTime) / 1000;
-      currentTime = Math.min(initialTime + elapsed * playbackSpeed, duration);
+      async function animate(currentAnimTime: number) {
+        if (!isPlaying) return;
 
-      if (isComposite) {
+        const elapsed = (currentAnimTime - startTime) / 1000;
+        currentTime = Math.min(initialTime + elapsed * playbackSpeed, duration);
+
         // Fire-and-forget: renderFrame manages its own race conditions
         renderFrame(currentTime).catch(err =>
           console.error('Frame render failed:', err)
         );
-      }
 
-      if (currentTime >= duration) {
-        pause();
-        return;
+        if (currentTime >= duration) {
+          pause();
+          return;
+        }
+
+        animationFrameId = requestAnimationFrame(animate);
       }
 
       animationFrameId = requestAnimationFrame(animate);
+    } else if (videoElement) {
+      // Simple mode: let HTML5 video handle playback
+      videoElement.play();
     }
-
-    animationFrameId = requestAnimationFrame(animate);
   }
 
   function pause() {
     isPlaying = false;
     if (animationFrameId) {
       cancelAnimationFrame(animationFrameId);
+    }
+    if (videoElement && !isComposite) {
+      videoElement.pause();
     }
   }
 
@@ -193,7 +208,7 @@
   function getSingleClipUrl(): string {
     if (!timeline?.tracks?.[0]?.clips?.[0]) return '';
     const clipId = timeline.tracks[0].clips[0].media_file_id;
-    return mediaFiles[clipId] || '';
+    return mediaFileSrcs[clipId] || '';  // Use asset:// URLs for video element
   }
 </script>
 
