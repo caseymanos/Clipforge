@@ -1,11 +1,20 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { onMount, onDestroy } from 'svelte';
+  import { timelineStore } from '../stores/timelineStore';
+  import { mediaLibraryStore } from '../stores/mediaLibraryStore';
+  import { convertFileSrc } from '@tauri-apps/api/core';
 
   // Props
-  export let timeline: any;
-  export let mediaFiles: Record<string, string>;
   export let autoPlay = false;
+
+  // Subscribe to stores for reactivity
+  $: timeline = $timelineStore;
+  $: mediaFiles = $mediaLibraryStore.reduce((acc, file) => {
+    // Convert file paths to Tauri's custom protocol URLs
+    acc[file.id] = convertFileSrc(file.path);
+    return acc;
+  }, {} as Record<string, string>);
 
   // State
   let videoElement: HTMLVideoElement;
@@ -30,7 +39,8 @@
 
     let activeClipCount = 0;
     for (const track of timeline.tracks) {
-      if (!track.enabled) continue;
+      // Backend uses 'muted', and we skip muted tracks
+      if (track.muted) continue;
 
       for (const clip of track.clips) {
         const clipStart = clip.track_position;

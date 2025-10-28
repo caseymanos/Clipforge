@@ -12,9 +12,13 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    host: "localhost",
     watch: {
       // Tell vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  // Prevent vite from obscuring rust errors
+  envPrefix: ["VITE_", "TAURI_"],
 });

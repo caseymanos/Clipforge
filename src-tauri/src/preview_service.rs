@@ -272,7 +272,7 @@ impl Default for PreviewService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Resolution, Track, TrackType};
+    use crate::models::{Resolution, Track, TrackType};
 
     #[test]
     fn test_find_active_clips() {
@@ -290,7 +290,7 @@ mod tests {
             tracks: vec![Track {
                 id: "track1".to_string(),
                 track_type: TrackType::Video,
-                enabled: true,
+                muted: false,
                 locked: false,
                 clips: vec![
                     Clip {
