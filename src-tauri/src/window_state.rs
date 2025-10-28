@@ -1,4 +1,4 @@
-use tauri::{App, AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Window};
+use tauri::{App, Manager, PhysicalPosition, PhysicalSize, Window};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

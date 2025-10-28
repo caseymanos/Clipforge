@@ -34,23 +34,39 @@ impl ThumbnailGenerator {
         video_path: &Path,
         timestamp: f64
     ) -> Result<PathBuf, ThumbnailError> {
+        let video_path_str = video_path.to_str()
+            .ok_or_else(|| ThumbnailError::IoError(
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Video path contains invalid UTF-8 characters"
+                )
+            ))?;
+
         let thumb_filename = format!("{}.jpg", Uuid::new_v4());
         let output_path = self.cache_dir.join(&thumb_filename);
+
+        let output_path_str = output_path.to_str()
+            .ok_or_else(|| ThumbnailError::IoError(
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Output path contains invalid UTF-8 characters"
+                )
+            ))?;
 
         log::debug!("Generating thumbnail for {:?} at {}s", video_path, timestamp);
 
         let status = Command::new("ffmpeg")
-            .args(&[
+            .args([
                 "-ss", &timestamp.to_string(),
-                "-i", video_path.to_str().unwrap(),
+                "-i", video_path_str,
                 "-vframes", "1",
                 "-vf", "scale=320:-1",  // Width 320px, height auto
                 "-q:v", "2",             // High quality JPEG
                 "-y",                    // Overwrite if exists
-                output_path.to_str().unwrap(),
+                output_path_str,
             ])
             .output()
-            .map_err(|e| ThumbnailError::IoError(e))?;
+            .map_err(ThumbnailError::IoError)?;
 
         if !status.status.success() {
             log::error!("FFmpeg thumbnail generation failed for {:?}", video_path);
@@ -81,11 +97,13 @@ impl ThumbnailGenerator {
     }
 
     /// Get the cache directory path
+    #[allow(dead_code)]
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
     }
 
     /// Clear all cached thumbnails
+    #[allow(dead_code)]
     pub fn clear_cache(&self) -> Result<(), ThumbnailError> {
         if self.cache_dir.exists() {
             std::fs::remove_dir_all(&self.cache_dir)?;

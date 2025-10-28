@@ -3,8 +3,16 @@ use tauri::{AppHandle, Manager, Window};
 // Module 2: File commands
 pub mod file_commands;
 
-// Re-export file commands for convenience
+// Module 3: FFmpeg commands
+pub mod ffmpeg_commands;
+
+// Module 4: Recording commands
+pub mod recording_commands;
+
+// Re-export commands for convenience
 pub use file_commands::*;
+pub use ffmpeg_commands::*;
+pub use recording_commands::*;
 
 /// Get the application version from Cargo.toml
 #[tauri::command]
@@ -17,7 +25,10 @@ pub fn get_app_version() -> String {
 pub fn open_devtools(window: Window) {
     #[cfg(debug_assertions)]
     {
-        window.open_devtools();
+        // Note: In Tauri v2, devtools are opened via WebviewWindow methods
+        // This is a no-op for now - devtools can be opened via right-click context menu
+        log::info!("DevTools requested - use right-click menu to open");
+        let _ = window; // Suppress unused variable warning
     }
 }
 

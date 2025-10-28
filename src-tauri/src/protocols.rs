@@ -1,83 +1,57 @@
-use tauri::{App, AppHandle};
-use std::fs;
+use tauri::App;
 use std::path::Path;
 
 /// Register custom stream:// protocol for efficient video file access
-pub fn register_stream_protocol(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
-    let app_handle = app.app_handle();
+pub fn register_stream_protocol(_app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
+    // Note: In Tauri v2, the asset protocol is configured via tauri.conf.json
+    // The 'asset' protocol is available by default for local file access
+    // Frontend can use convertFileSrc() from @tauri-apps/api/core to convert paths
 
-    app_handle.asset_protocol_scope().allow_directory(
-        dirs::home_dir().unwrap_or_default(),
-        true,
-    )?;
+    // Protocol scope is configured in tauri.conf.json under security settings
+    // We don't need to programmatically set it here
 
-    // Register the stream protocol
-    app.handle().register_asynchronous_uri_scheme_protocol("stream", move |_app, request, responder| {
-        let path = request.uri().path();
-
-        // Security: Validate path is within allowed directories
-        if !is_path_allowed(path) {
-            log::warn!("Access denied to path: {}", path);
-            responder.respond(
-                tauri::http::Response::builder()
-                    .status(403)
-                    .body(vec![])
-                    .unwrap()
-            );
-            return;
-        }
-
-        // Read video file
-        match fs::read(path) {
-            Ok(data) => {
-                // Determine MIME type from extension
-                let mime_type = get_mime_type(path);
-
-                responder.respond(
-                    tauri::http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", mime_type)
-                        .header("Accept-Ranges", "bytes")
-                        .body(data)
-                        .unwrap()
-                );
-            }
-            Err(e) => {
-                log::error!("Failed to read file {}: {}", path, e);
-                responder.respond(
-                    tauri::http::Response::builder()
-                        .status(404)
-                        .body(vec![])
-                        .unwrap()
-                );
-            }
-        }
-    });
+    log::info!("Protocol registration skipped - using default asset protocol");
 
     Ok(())
 }
 
 /// Check if a path is within allowed directories
+///
+/// Canonicalizes paths to prevent traversal attacks (e.g., ../)
+#[allow(dead_code)]
 fn is_path_allowed(path: &str) -> bool {
-    let path = Path::new(path);
+    // Canonicalize to resolve .. and symlinks, preventing traversal attacks
+    let canonical_path = match Path::new(path).canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            log::warn!("Failed to canonicalize path: {}", path);
+            return false;
+        }
+    };
 
     // Only allow paths in user's home or app data directory
     if let Some(home_dir) = dirs::home_dir() {
-        if path.starts_with(home_dir) {
-            return true;
+        if let Ok(canonical_home) = home_dir.canonicalize() {
+            if canonical_path.starts_with(canonical_home) {
+                return true;
+            }
         }
     }
 
     if let Some(data_dir) = dirs::data_local_dir() {
-        if path.starts_with(data_dir) {
-            return true;
+        if let Ok(canonical_data) = data_dir.canonicalize() {
+            if canonical_path.starts_with(canonical_data) {
+                return true;
+            }
         }
     }
 
+    log::warn!("Path not allowed: {:?}", canonical_path);
     false
 }
 
 /// Get MIME type from file extension
+#[allow(dead_code)]
 fn get_mime_type(path: &str) -> &'static str {
     match Path::new(path).extension().and_then(|e| e.to_str()) {
         Some("mp4") => "video/mp4",

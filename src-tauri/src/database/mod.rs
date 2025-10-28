@@ -9,6 +9,16 @@ pub struct Database {
 }
 
 impl Database {
+    /// Helper to handle mutex lock with proper error handling for poisoned locks
+    fn lock_conn(&self) -> Result<std::sync::MutexGuard<Connection>, rusqlite::Error> {
+        self.conn.lock().map_err(|e| {
+            log::error!("Database mutex poisoned: {}", e);
+            rusqlite::Error::InvalidPath(
+                format!("Database connection unavailable (mutex poisoned): {}", e).into()
+            )
+        })
+    }
+
     /// Create a new database connection
     pub fn new() -> Result<Self, rusqlite::Error> {
         let db_path = dirs::data_local_dir()
@@ -41,12 +51,32 @@ impl Database {
 
     /// Insert a new media file
     pub fn insert_media_file(&self, file: &MediaFile) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
+
+        let path_str = file.path.to_str()
+            .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Path contains invalid UTF-8 characters"
+                ))
+            ))?;
+
+        let thumbnail_str = file.thumbnail_path.as_ref()
+            .map(|p| p.to_str()
+                .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Thumbnail path contains invalid UTF-8 characters"
+                    ))
+                ))
+            )
+            .transpose()?;
+
         conn.execute(
             "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 file.id,
-                file.path.to_str().unwrap(),
+                path_str,
                 file.filename,
                 file.duration,
                 file.resolution.width,
@@ -54,7 +84,7 @@ impl Database {
                 file.codec.video,
                 file.codec.audio,
                 file.file_size,
-                file.thumbnail_path.as_ref().map(|p| p.to_str().unwrap()),
+                thumbnail_str,
                 file.hash,
                 file.imported_at.to_rfc3339(),
             ],
@@ -64,7 +94,7 @@ impl Database {
 
     /// Find media file by hash (for deduplication)
     pub fn find_by_hash(&self, hash: &str) -> Result<Option<MediaFile>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT * FROM media_files WHERE hash = ?1 LIMIT 1"
         )?;
@@ -80,7 +110,7 @@ impl Database {
 
     /// Get media file by ID
     pub fn get_by_id(&self, id: &str) -> Result<Option<MediaFile>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT * FROM media_files WHERE id = ?1"
         )?;
@@ -96,7 +126,7 @@ impl Database {
 
     /// Get all media files, sorted by import date (newest first)
     pub fn get_all(&self) -> Result<Vec<MediaFile>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT * FROM media_files ORDER BY imported_at DESC"
         )?;
@@ -113,7 +143,7 @@ impl Database {
 
     /// Delete media file by ID
     pub fn delete_media_file(&self, id: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "DELETE FROM media_files WHERE id = ?1",
             params![id],
@@ -122,8 +152,9 @@ impl Database {
     }
 
     /// Find media files by codec
+    #[allow(dead_code)]
     pub fn find_by_codec(&self, codec: &str) -> Result<Vec<MediaFile>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT * FROM media_files WHERE video_codec = ?1 ORDER BY imported_at DESC"
         )?;
@@ -156,21 +187,47 @@ impl Database {
             file_size: row.get(8)?,
             thumbnail_path: row.get::<_, Option<String>>(9)?.map(PathBuf::from),
             hash: row.get(10)?,
-            imported_at: row.get::<_, String>(11)?.parse().unwrap(),
+            imported_at: row.get::<_, String>(11)?
+                .parse()
+                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                    11,
+                    rusqlite::types::Type::Text,
+                    Box::new(e)
+                ))?,
         })
     }
 
     /// Bulk insert multiple files (using transaction for performance)
+    #[allow(dead_code)]
     pub fn insert_multiple(&self, files: &[MediaFile]) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
 
         for file in files {
+            let path_str = file.path.to_str()
+                .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Path contains invalid UTF-8 characters"
+                    ))
+                ))?;
+
+            let thumbnail_str = file.thumbnail_path.as_ref()
+                .map(|p| p.to_str()
+                    .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "Thumbnail path contains invalid UTF-8 characters"
+                        ))
+                    ))
+                )
+                .transpose()?;
+
             tx.execute(
                 "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     file.id,
-                    file.path.to_str().unwrap(),
+                    path_str,
                     file.filename,
                     file.duration,
                     file.resolution.width,
@@ -178,7 +235,7 @@ impl Database {
                     file.codec.video,
                     file.codec.audio,
                     file.file_size,
-                    file.thumbnail_path.as_ref().map(|p| p.to_str().unwrap()),
+                    thumbnail_str,
                     file.hash,
                     file.imported_at.to_rfc3339(),
                 ],

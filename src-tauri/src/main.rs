@@ -4,6 +4,8 @@
 )]
 
 use tauri::Manager;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 // Module 1: Application Shell
 mod commands;
@@ -17,10 +19,25 @@ mod database;
 mod metadata;
 mod thumbnail;
 mod file_service;
+mod error_handler;
+
+// Module 3: FFmpeg Integration
+mod ffmpeg;
+
+// Module 4: Screen Recording
+mod recording;
+
+// Module 5: Timeline Engine
+mod timeline;
+mod timeline_commands;
 
 use database::Database;
 use thumbnail::ThumbnailGenerator;
 use file_service::FileService;
+use ffmpeg::FFmpegService;
+use commands::recording_commands::RecordingService;
+use timeline::TimelineService;
+use timeline_commands::TimelineServiceState;
 
 fn main() {
     // Initialize logging
@@ -39,14 +56,30 @@ fn main() {
                 .expect("Failed to initialize thumbnail generator");
             let file_service = FileService::new(db, thumbnail_gen);
 
+            // Module 3: Initialize FFmpeg service
+            let ffmpeg_service = FFmpegService::new()
+                .expect("Failed to initialize FFmpeg service");
+
+            // Module 4: Initialize Recording service
+            let recording_service = RecordingService::new();
+
+            // Module 5: Initialize Timeline service
+            let timeline_service = TimelineService::new();
+            let timeline_state = TimelineServiceState {
+                service: Arc::new(Mutex::new(timeline_service)),
+            };
+
             app.manage(file_service);
+            app.manage(ffmpeg_service);
+            app.manage(recording_service);
+            app.manage(timeline_state);
 
             log::info!("ClipForge initialized successfully");
 
             Ok(())
         })
         // Set up menu
-        .menu(menu::create_menu())
+        .menu(menu::create_menu)
         .on_menu_event(menu::handle_menu_event)
         // Register all commands
         .invoke_handler(tauri::generate_handler![
@@ -62,13 +95,36 @@ fn main() {
             commands::get_file_metadata,
             commands::generate_thumbnail,
             commands::generate_thumbnail_sequence,
+            // Module 3 commands
+            commands::trim_video_clip,
+            commands::concatenate_clips,
+            commands::extract_video_frame,
+            commands::apply_video_filter,
+            // Module 4 commands
+            commands::list_recording_sources,
+            commands::check_recording_permissions,
+            commands::request_recording_permissions,
+            commands::start_recording,
+            commands::stop_recording,
+            commands::get_recording_state,
+            commands::get_recording_duration,
+            // Module 5 commands
+            timeline_commands::create_timeline,
+            timeline_commands::get_current_timeline,
+            timeline_commands::add_track,
+            timeline_commands::remove_track,
+            timeline_commands::add_clip_to_timeline,
+            timeline_commands::remove_clip_from_timeline,
+            timeline_commands::move_clip_on_timeline,
+            timeline_commands::trim_clip_on_timeline,
+            timeline_commands::split_clip_at_time,
+            timeline_commands::get_clips_at_playhead,
+            timeline_commands::save_timeline_project,
+            timeline_commands::load_timeline_project,
         ])
         // Handle window events
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { .. } => {
-                window_state::save_window_state(window);
-            }
-            _ => {}
+        .on_window_event(|window, event| if let tauri::WindowEvent::CloseRequested { .. } = event {
+            window_state::save_window_state(window);
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

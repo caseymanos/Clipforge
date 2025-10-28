@@ -5,13 +5,21 @@ use crate::models::{FileMetadata, Resolution, VideoCodec, MetadataError};
 
 /// Extract video metadata using FFprobe
 pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError> {
+    let path_str = path.to_str()
+        .ok_or_else(|| MetadataError::IoError(
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Path contains invalid UTF-8 characters"
+            )
+        ))?;
+
     let output = Command::new("ffprobe")
-        .args(&[
+        .args([
             "-v", "quiet",
             "-print_format", "json",
             "-show_streams",
             "-show_format",
-            path.to_str().unwrap(),
+            path_str,
         ])
         .output()?;
 

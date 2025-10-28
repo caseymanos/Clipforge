@@ -42,12 +42,25 @@ impl FileService {
         // 2. Calculate hash for deduplication
         let hash = self.calculate_hash(&path)?;
 
-        // 3. Check database for duplicate (indexed lookup)
+        // 3. Get file size for additional collision detection
+        let file_size = std::fs::metadata(&path)?.len();
+
+        // 4. Check database for duplicate (indexed lookup)
         if let Some(existing) = self.db.find_by_hash(&hash)? {
-            log::info!("File already exists in library (duplicate): {:?}", path);
-            // Warm cache with existing file
-            self.cache.write().await.insert(existing.id.clone(), existing.clone());
-            return Ok(existing);
+            // Additional verification: compare file size to detect extremely rare hash collisions
+            if existing.file_size == file_size {
+                log::info!("File already exists in library (duplicate): {:?}", path);
+                // Warm cache with existing file
+                self.cache.write().await.insert(existing.id.clone(), existing.clone());
+                return Ok(existing);
+            } else {
+                // Extremely rare: hash collision with different file sizes
+                log::warn!(
+                    "Hash collision detected! Same hash but different sizes: existing={} bytes, new={} bytes",
+                    existing.file_size, file_size
+                );
+                // Continue with import - allow both files
+            }
         }
 
         // 4. Extract metadata using FFprobe
@@ -69,13 +82,13 @@ impl FileService {
             id: Uuid::new_v4().to_string(),
             path: path.clone(),
             filename: path.file_name()
-                .unwrap()
+                .ok_or(FileError::InvalidFormat)?
                 .to_string_lossy()
                 .to_string(),
             duration: metadata.duration,
             resolution: metadata.resolution,
             codec: metadata.codec,
-            file_size: std::fs::metadata(&path)?.len(),
+            file_size,  // Use previously calculated file_size
             thumbnail_path: Some(thumbnail_path),
             hash,
             imported_at: Utc::now(),
@@ -154,6 +167,7 @@ impl FileService {
     }
 
     /// Get database reference for advanced queries
+    #[allow(dead_code)]
     pub fn database(&self) -> &Database {
         &self.db
     }

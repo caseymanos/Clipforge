@@ -89,3 +89,109 @@ pub enum ThumbnailError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }
+
+// ============================================================================
+// Module 5: Timeline Engine Data Structures
+// ============================================================================
+
+/// Represents a complete timeline project
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Timeline {
+    pub id: String,
+    pub name: String,
+    pub framerate: f64,
+    pub resolution: Resolution,
+    pub tracks: Vec<Track>,
+    pub duration: f64,  // Total duration in seconds
+}
+
+/// A track in the timeline (Video, Audio, or Overlay)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Track {
+    pub id: String,
+    pub track_type: TrackType,
+    pub clips: Vec<Clip>,
+    pub muted: bool,
+    pub locked: bool,
+}
+
+/// Type of track
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TrackType {
+    Video,
+    Audio,
+    Overlay,
+}
+
+/// A clip on the timeline
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Clip {
+    pub id: String,
+    pub media_file_id: String,
+    pub track_position: f64,  // Position on timeline in seconds
+    pub duration: f64,  // Duration in seconds (can differ from source if trimmed)
+    pub trim_start: f64,  // Trim from start of source in seconds
+    pub trim_end: f64,  // Trim from end of source in seconds
+    pub effects: Vec<Effect>,
+    pub volume: f32,  // 0.0 to 1.0 (or higher for amplification)
+    pub speed: f32,  // Playback speed multiplier (0.5 = half speed, 2.0 = double speed)
+}
+
+/// Video/audio effect applied to a clip
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Effect {
+    pub id: String,
+    pub effect_type: EffectType,
+    pub enabled: bool,
+}
+
+/// Types of effects that can be applied
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum EffectType {
+    // Video effects
+    Brightness { value: f32 },  // -1.0 to 1.0
+    Contrast { value: f32 },  // -1.0 to 1.0
+    Saturation { value: f32 },  // -1.0 to 1.0
+    Blur { radius: f32 },  // 0.0 to 100.0
+    Sharpen { amount: f32 },  // 0.0 to 1.0
+
+    // Audio effects
+    Normalize,
+    FadeIn { duration: f64 },  // seconds
+    FadeOut { duration: f64 },  // seconds
+}
+
+/// Custom error types for timeline operations
+#[derive(Debug, thiserror::Error)]
+pub enum TimelineError {
+    #[error("Timeline not found")]
+    TimelineNotFound,
+
+    #[error("Track not found: {0}")]
+    TrackNotFound(String),
+
+    #[error("Clip not found: {0}")]
+    ClipNotFound(String),
+
+    #[error("Invalid clip position: {0}")]
+    InvalidPosition(String),
+
+    #[error("Clip overlap detected")]
+    ClipOverlap,
+
+    #[error("Invalid trim values")]
+    InvalidTrim,
+
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
+
+    #[error("Overlap error: {0}")]
+    OverlapError(String),
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+}
