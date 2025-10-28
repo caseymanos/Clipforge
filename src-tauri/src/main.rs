@@ -49,6 +49,8 @@ fn main() {
     env_logger::init();
 
     tauri::Builder::default()
+        // Register plugins
+        .plugin(tauri_plugin_dialog::init())
         // Register custom protocols
         .setup(|app| {
             protocols::register_stream_protocol(app)?;

@@ -10,6 +10,7 @@
     moveClip,
     selectClip,
     updateClipDuration,
+    addMediaFileToTimeline,
     type Timeline,
     type Track,
     type Clip
@@ -379,6 +380,50 @@
     const newOffset = currentScrollOffset + delta;
     scrollOffset.set(Math.max(0, newOffset));
   }
+
+  // Drag-and-drop handlers for adding media to timeline
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  async function handleDrop(e: DragEvent) {
+    e.preventDefault();
+
+    if (!e.dataTransfer) return;
+
+    // Get MediaFile data
+    const data = e.dataTransfer.getData('application/json');
+    if (!data) return;
+
+    try {
+      const mediaFile = JSON.parse(data);
+
+      // Calculate drop position from mouse X coordinate
+      const rect = container.getBoundingClientRect();
+      const dropX = e.clientX - rect.left;
+      const timePosition = (dropX + currentScrollOffset) / currentPixelsPerSecond;
+
+      // Calculate drop track from mouse Y coordinate
+      const dropY = e.clientY - rect.top;
+      const trackIndex = Math.floor((dropY - RULER_HEIGHT) / (TRACK_HEIGHT + TRACK_PADDING));
+
+      // Get target track
+      const targetTrack = currentTimeline.tracks[trackIndex];
+
+      if (targetTrack && !targetTrack.locked) {
+        // Add file to timeline at drop position
+        await addMediaFileToTimeline(mediaFile, targetTrack.id, Math.max(0, timePosition));
+        console.log(`Dropped ${mediaFile.filename} on track ${targetTrack.id} at ${timePosition.toFixed(2)}s`);
+      } else {
+        console.warn('Cannot drop on locked or invalid track');
+      }
+    } catch (error) {
+      console.error('Failed to handle drop:', error);
+    }
+  }
 </script>
 
 <div class="timeline-container">
@@ -387,6 +432,8 @@
     bind:this={container}
     class="timeline-canvas"
     on:wheel={handleScroll}
+    on:dragover={handleDragOver}
+    on:drop={handleDrop}
     role="application"
     aria-label="Timeline editor"
     tabindex="0"

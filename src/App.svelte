@@ -3,82 +3,38 @@
   import { invoke } from "@tauri-apps/api/core";
   import Timeline from "./lib/components/Timeline.svelte";
   import VideoPreview from "./lib/components/VideoPreview.svelte";
-  import { timelineStore, addClipToTrack, type Clip } from "./lib/stores/timelineStore";
+  import MediaLibrary from "./lib/components/MediaLibrary.svelte";
+  import { initializeTimeline } from "./lib/stores/timelineStore";
 
   let appVersion = "";
 
   onMount(async () => {
     appVersion = await invoke("get_app_version");
 
-    // Add example clips for demonstration
-    addExampleClips();
+    // Initialize timeline from backend
+    try {
+      await initializeTimeline();
+      console.log("Timeline initialized from backend");
+    } catch (error) {
+      console.error("Failed to initialize timeline:", error);
+    }
   });
-
-  function addExampleClips() {
-    // Add some demo clips to the timeline
-    const demoClips: Clip[] = [
-      {
-        id: 'clip-1',
-        media_file_id: 'media-1',
-        track_position: 0,
-        duration: 5.0,
-        trim_start: 0,
-        trim_end: 5.0,
-        effects: [],
-        volume: 1.0,
-        speed: 1.0,
-      },
-      {
-        id: 'clip-2',
-        media_file_id: 'media-2',
-        track_position: 6.0,
-        duration: 4.0,
-        trim_start: 0,
-        trim_end: 4.0,
-        effects: [],
-        volume: 1.0,
-        speed: 1.0,
-      },
-      {
-        id: 'clip-3',
-        media_file_id: 'media-3',
-        track_position: 11.0,
-        duration: 3.5,
-        trim_start: 0,
-        trim_end: 3.5,
-        effects: [],
-        volume: 1.0,
-        speed: 1.0,
-      },
-      {
-        id: 'clip-4',
-        media_file_id: 'media-4',
-        track_position: 1.0,
-        duration: 6.0,
-        trim_start: 0,
-        trim_end: 6.0,
-        effects: [],
-        volume: 1.0,
-        speed: 1.0,
-      },
-    ];
-
-    // Add clips to video track
-    addClipToTrack('video-track-1', demoClips[0]);
-    addClipToTrack('video-track-1', demoClips[1]);
-    addClipToTrack('video-track-1', demoClips[2]);
-
-    // Add clip to audio track
-    addClipToTrack('audio-track-1', demoClips[3]);
-  }
 </script>
 
 <main class="container">
   <header>
     <h1>ClipForge</h1>
-    <p class="subtitle">Desktop Video Editor - Modules 5-8: Timeline + Preview</p>
+    <p class="subtitle">Desktop Video Editor - Complete Application</p>
     <p class="version">Version {appVersion}</p>
   </header>
+
+  <section class="media-library-section">
+    <h2>Media Library</h2>
+    <p class="description">
+      Import and manage your video files. Click "Import Media" to add videos, then double-click to add them to the timeline.
+    </p>
+    <MediaLibrary />
+  </section>
 
   <section class="preview-section">
     <h2>Video Preview</h2>
@@ -99,8 +55,16 @@
   </section>
 
   <section class="features">
-    <h3>Modules 5-8 Features Implemented</h3>
+    <h3>Features Implemented</h3>
     <div class="feature-grid">
+      <div class="feature">
+        <h4>✅ Media Library</h4>
+        <p>Import, manage, and organize video files with thumbnails</p>
+      </div>
+      <div class="feature">
+        <h4>✅ File Import</h4>
+        <p>Multi-file import with deduplication and metadata extraction</p>
+      </div>
       <div class="feature">
         <h4>✅ Canvas Rendering</h4>
         <p>Konva.js-based rendering for 60 FPS with 200+ clips</p>
@@ -133,25 +97,36 @@
         <h4>✅ Selection System</h4>
         <p>Click to select clips, visual feedback</p>
       </div>
+      <div class="feature">
+        <h4>✅ Search & Filter</h4>
+        <p>Search files by name and sort by various criteria</p>
+      </div>
+      <div class="feature">
+        <h4>✅ File Metadata</h4>
+        <p>Display resolution, codec, duration, and file size</p>
+      </div>
     </div>
   </section>
 
   <section class="instructions">
     <h3>How to Use</h3>
     <ul>
-      <li><strong>Drag clips:</strong> Click and drag any clip to move it</li>
+      <li><strong>Import videos:</strong> Click "Import Media" to add video files to your library</li>
+      <li><strong>Browse library:</strong> Search and sort your imported files</li>
+      <li><strong>Select files:</strong> Click on a file to select it, double-click to add to timeline (coming soon)</li>
+      <li><strong>Remove files:</strong> Hover over a file and click the trash icon to remove it</li>
+      <li><strong>Drag clips:</strong> Click and drag any clip on the timeline to move it</li>
       <li><strong>Trim clips:</strong> Select a clip, then drag the white handles on the edges</li>
-      <li><strong>Zoom:</strong> Use mouse wheel to zoom in/out</li>
+      <li><strong>Zoom:</strong> Use mouse wheel to zoom in/out on the timeline</li>
       <li><strong>Scroll:</strong> Hold Shift + mouse wheel to scroll horizontally</li>
       <li><strong>Move playhead:</strong> Drag the red circle or click on the timeline</li>
-      <li><strong>Select clip:</strong> Click on any clip to select it</li>
     </ul>
   </section>
 
   <footer>
     <p>Built with Tauri 2.0 + Svelte 4 + Konva.js + Rust</p>
     <p class="architecture">
-      Modules: Application Shell (1) • File System (2) • Timeline Engine (5) • Timeline UI (7)
+      Modules: Application Shell (1) • File System (2) • Timeline Engine (5) • Timeline UI (7) • Video Preview (8)
     </p>
   </footer>
 </main>
@@ -195,6 +170,14 @@
   .version {
     color: #666;
     font-size: 0.9rem;
+  }
+
+  .media-library-section {
+    margin-bottom: 3rem;
+  }
+
+  .preview-section {
+    margin-bottom: 3rem;
   }
 
   .timeline-section {
