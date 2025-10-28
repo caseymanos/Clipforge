@@ -32,10 +32,8 @@ mod timeline;
 mod timeline_commands;
 
 // Module 6: Export & Rendering
-// TEMPORARILY DISABLED - needs ExportSettings/ExportProgress/ExportError types in models.rs
-// and needs to be updated to use 'muted' field and new EffectType enum
-// mod export;
-// mod export_commands;
+mod export;
+mod export_commands;
 
 // Module 8: Video Preview
 mod preview_cache;
@@ -48,9 +46,8 @@ use ffmpeg::FFmpegService;
 use commands::recording_commands::RecordingService;
 use timeline::TimelineService;
 use timeline_commands::TimelineServiceState;
-// TEMPORARILY DISABLED - export module has compilation errors
-// use export::ExportService;
-// use export_commands::ExportServiceState;
+use export::ExportService;
+use export_commands::ExportServiceState;
 use preview_service::PreviewService;
 use models::Resolution;
 
@@ -101,14 +98,12 @@ fn main() {
                 service: Arc::new(Mutex::new(timeline_service)),
             };
 
-            // Module 6: TEMPORARILY DISABLED - Export service has compilation errors
-            // Needs ExportSettings/ExportProgress/ExportError types added to models.rs
-            // Also needs to be updated for 'muted' field and new EffectType enum
-            // let export_service = ExportService::new()
-            //     .expect("Failed to initialize export service");
-            // let export_state = ExportServiceState {
-            //     service: Arc::new(Mutex::new(export_service)),
-            // };
+            // Module 6: Initialize Export service
+            let export_service = ExportService::new()
+                .expect("Failed to initialize export service");
+            let export_state = ExportServiceState {
+                service: Arc::new(Mutex::new(export_service)),
+            };
 
             // Module 8: Initialize Preview service
             let preview_service = Arc::new(Mutex::new(PreviewService::new()));
@@ -117,7 +112,7 @@ fn main() {
             app.manage(ffmpeg_service);
             app.manage(recording_service);
             app.manage(timeline_state);
-            // app.manage(export_state);  // Temporarily disabled
+            app.manage(export_state);
             app.manage(preview_service);
 
             log::info!("ClipForge initialized successfully");
@@ -167,10 +162,11 @@ fn main() {
             timeline_commands::get_clips_at_playhead,
             timeline_commands::save_timeline_project,
             timeline_commands::load_timeline_project,
-            // Module 6 commands - TEMPORARILY DISABLED
-            // export_commands::export_timeline,
-            // export_commands::cancel_export,
-            // export_commands::get_export_presets,
+            // Module 6 commands
+            export_commands::export_timeline,
+            export_commands::cancel_export,
+            export_commands::get_export_presets,
+            export_commands::validate_timeline_for_export,
             // Module 8 commands
             commands::render_preview_frame,
             commands::clear_preview_cache,

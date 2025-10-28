@@ -1,5 +1,5 @@
 use crate::models::{
-    Timeline, Track, Clip, Effect, EffectType, TrackType,
+    Timeline, Effect, EffectType, TrackType,
     ExportSettings, ExportProgress, ExportError, MediaFile,
 };
 use std::path::{Path, PathBuf};
@@ -7,10 +7,9 @@ use std::process::{Command, Stdio};
 use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
-use tauri::Window;
-use log::{info, error, warn};
+use tauri::{Window, Emitter};
+use log::info;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Export service for rendering timelines to video files
@@ -101,7 +100,7 @@ impl ExportService {
     ) -> Result<(), ExportError> {
         // Check if timeline has any video tracks
         let has_video = timeline.tracks.iter()
-            .any(|t| matches!(t.track_type, TrackType::Video) && t.enabled && !t.clips.is_empty());
+            .any(|t| matches!(t.track_type, TrackType::Video) && !t.muted && !t.clips.is_empty());
 
         if !has_video {
             return Err(ExportError::ValidationError(
@@ -148,7 +147,7 @@ impl ExportService {
         let mut input_index = 0;
 
         for track in &timeline.tracks {
-            if !track.enabled {
+            if track.muted {
                 continue;
             }
 
@@ -209,7 +208,7 @@ impl ExportService {
         &self,
         timeline: &Timeline,
         input_map: &HashMap<String, usize>,
-        media_files: &HashMap<String, MediaFile>,
+        _media_files: &HashMap<String, MediaFile>,
     ) -> Result<String, ExportError> {
         let mut filters = Vec::new();
         let mut video_inputs = Vec::new();
@@ -217,7 +216,7 @@ impl ExportService {
 
         // Process each track
         for (track_idx, track) in timeline.tracks.iter().enumerate() {
-            if !track.enabled {
+            if track.muted {
                 continue;
             }
 
@@ -310,24 +309,34 @@ impl ExportService {
         let mut filters = Vec::new();
 
         for effect in effects {
-            let filter = match effect.effect_type {
-                EffectType::Brightness => {
-                    format!("eq=brightness={}", effect.intensity)
+            if !effect.enabled {
+                continue;
+            }
+
+            let filter = match &effect.effect_type {
+                EffectType::Brightness { value } => {
+                    format!("eq=brightness={}", value)
                 }
-                EffectType::Contrast => {
-                    format!("eq=contrast={}", effect.intensity)
+                EffectType::Contrast { value } => {
+                    format!("eq=contrast={}", value)
                 }
-                EffectType::Saturation => {
-                    format!("eq=saturation={}", effect.intensity)
+                EffectType::Saturation { value } => {
+                    format!("eq=saturation={}", value)
                 }
-                EffectType::Blur => {
-                    format!("boxblur={}:1", (effect.intensity * 10.0) as i32)
+                EffectType::Blur { radius } => {
+                    format!("boxblur={}:1", (*radius * 10.0) as i32)
                 }
-                EffectType::FadeIn => {
-                    format!("fade=t=in:st=0:d={}", effect.intensity)
+                EffectType::Sharpen { amount } => {
+                    format!("unsharp=5:5:{}", amount * 2.0)
                 }
-                EffectType::FadeOut => {
-                    format!("fade=t=out:st=0:d={}", effect.intensity)
+                EffectType::Normalize => {
+                    "loudnorm".to_string()
+                }
+                EffectType::FadeIn { duration } => {
+                    format!("fade=t=in:st=0:d={}", duration)
+                }
+                EffectType::FadeOut { duration } => {
+                    format!("fade=t=out:st=0:d={}", duration)
                 }
             };
             filters.push(filter);

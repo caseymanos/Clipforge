@@ -1,4 +1,4 @@
-use crate::models::{Timeline, ExportSettings, ExportProgress, MediaFile};
+use crate::models::{Timeline, ExportSettings, MediaFile};
 use crate::export::ExportService;
 use tauri::{State, Window};
 use std::path::PathBuf;
@@ -61,7 +61,7 @@ pub async fn validate_timeline_for_export(
 ) -> Result<bool, String> {
     // Basic validation
     let has_video = timeline.tracks.iter()
-        .any(|t| t.enabled && !t.clips.is_empty());
+        .any(|t| !t.muted && !t.clips.is_empty());
 
     if !has_video {
         return Err("Timeline must have at least one enabled track with clips".to_string());

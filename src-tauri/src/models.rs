@@ -195,3 +195,108 @@ pub enum TimelineError {
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
+
+// ============================================================================
+// Module 6: Export & Rendering Data Structures
+// ============================================================================
+
+/// Export settings for timeline rendering
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportSettings {
+    pub video_codec: String,      // e.g., "libx264", "libx265"
+    pub audio_codec: String,      // e.g., "aac", "mp3"
+    pub video_bitrate: u32,       // in kbps
+    pub audio_bitrate: u32,       // in kbps
+    pub framerate: f64,           // frames per second
+    pub resolution: Resolution,   // output resolution
+    pub format: String,           // e.g., "mp4", "mov", "webm"
+}
+
+impl ExportSettings {
+    /// YouTube 1080p preset
+    pub fn youtube_1080p() -> Self {
+        Self {
+            video_codec: "libx264".to_string(),
+            audio_codec: "aac".to_string(),
+            video_bitrate: 8000,
+            audio_bitrate: 192,
+            framerate: 30.0,
+            resolution: Resolution { width: 1920, height: 1080 },
+            format: "mp4".to_string(),
+        }
+    }
+
+    /// Instagram post preset (1:1 square)
+    pub fn instagram_post() -> Self {
+        Self {
+            video_codec: "libx264".to_string(),
+            audio_codec: "aac".to_string(),
+            video_bitrate: 5000,
+            audio_bitrate: 128,
+            framerate: 30.0,
+            resolution: Resolution { width: 1080, height: 1080 },
+            format: "mp4".to_string(),
+        }
+    }
+
+    /// Twitter video preset
+    pub fn twitter_video() -> Self {
+        Self {
+            video_codec: "libx264".to_string(),
+            audio_codec: "aac".to_string(),
+            video_bitrate: 6000,
+            audio_bitrate: 128,
+            framerate: 30.0,
+            resolution: Resolution { width: 1280, height: 720 },
+            format: "mp4".to_string(),
+        }
+    }
+
+    /// Custom export settings
+    pub fn custom(
+        video_codec: String,
+        audio_codec: String,
+        video_bitrate: u32,
+        audio_bitrate: u32,
+        framerate: f64,
+        resolution: Resolution,
+    ) -> Self {
+        Self {
+            video_codec,
+            audio_codec,
+            video_bitrate,
+            audio_bitrate,
+            framerate,
+            resolution,
+            format: "mp4".to_string(),
+        }
+    }
+}
+
+/// Export progress information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportProgress {
+    pub percentage: f64,           // 0.0 to 100.0
+    pub current_frame: u64,        // Current frame being processed
+    pub fps: f64,                  // Current encoding FPS
+    pub time_remaining_secs: u64,  // Estimated seconds remaining
+}
+
+/// Custom error types for export operations
+#[derive(Debug, thiserror::Error)]
+pub enum ExportError {
+    #[error("FFmpeg error: {0}")]
+    FFmpegError(String),
+
+    #[error("Timeline validation error: {0}")]
+    ValidationError(String),
+
+    #[error("Output file error: {0}")]
+    OutputError(String),
+
+    #[error("Export cancelled by user")]
+    Cancelled,
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+}
