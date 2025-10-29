@@ -871,6 +871,55 @@
           preload="metadata"
           playsinline
           on:loadedmetadata={(e) => { duration = e.currentTarget.duration; }}
+          on:ended={() => {
+            // Video element reached its natural end - handle transition to next clip
+            console.log('[VideoPreview] Video element ended event fired');
+
+            if (!clipInfo) return;
+
+            const currentClipEnd = clipInfo.clip.track_position + clipInfo.clip.duration;
+
+            // IMPORTANT: Check if there's an audio clip that EXTENDS BEYOND the current video clip end
+            // This handles cases where audio truly continues after video ends (e.g., trimmed video with longer audio)
+            const currentMediaState = getActiveMediaState();
+            if (currentMediaState.hasAudio && currentMediaState.audioClip) {
+              const audioClipEnd = currentMediaState.audioClip.track_position + currentMediaState.audioClip.duration;
+              // Only let audio continue if it extends past the current video clip's end
+              if (audioClipEnd > currentClipEnd + 0.01) {
+                console.log('[VideoPreview] Video ended but audio extends beyond video clip end - letting audio play', {
+                  videoClipEnd: currentClipEnd,
+                  audioClipEnd: audioClipEnd
+                });
+                return; // Don't interrupt, let audio continue
+              }
+            }
+
+            // No audio extending beyond video - check if there's media ahead
+            if (hasMediaAfterTime(currentClipEnd)) {
+              const nextClip = findNextClip(currentClipEnd);
+              if (nextClip) {
+                console.log('[VideoPreview] Video ended, jumping to next clip at', nextClip.clip.track_position);
+                playheadTime.set(nextClip.clip.track_position);
+
+                // CRITICAL: Ensure playback continues after jump
+                requestAnimationFrame(() => {
+                  if (videoElement && hasVideo && videoElement.paused) {
+                    console.log('[VideoPreview] Starting video for next clip');
+                    videoElement.play().catch(e => console.warn('Failed to start video:', e));
+                  }
+                  if (audioElement && hasAudio && audioElement.paused) {
+                    console.log('[VideoPreview] Starting audio for next clip');
+                    audioElement.play().catch(e => console.warn('Failed to start audio:', e));
+                  }
+                });
+                return;
+              }
+            }
+
+            // No more media - stop playback
+            console.log('[VideoPreview] Video ended, no more media - stopping playback');
+            pause();
+          }}
           on:timeupdate={() => {
             if (clipInfo?.clip && videoElement) {
               // Update playhead position during playback
@@ -883,32 +932,40 @@
                 playheadTime.set(timelineTime);
               }
 
-              // Check trim boundary
+              // Check trim boundary (trigger early to prevent natural end)
               const trimEnd = clipInfo.clip.trim_end || clipInfo.mediaFile.duration;
-              if (videoElement.currentTime >= trimEnd) {
-                // Video clip ended - check what to do next
+              if (videoElement.currentTime >= trimEnd - 0.1) {
+                // Video clip approaching end (within 100ms) - check what to do next
                 const currentClipEnd = clipInfo.clip.track_position + clipInfo.clip.duration;
 
-                // Check if there's ANY media still playing at current position
-                const mediaState = getActiveMediaState();
-
-                // If audio is currently playing, don't interrupt it
-                if (mediaState.hasAudio) {
-                  console.log('[VideoPreview] Video ended but audio continues - letting audio play');
-                  return; // Don't pause, let audio continue naturally
+                // IMPORTANT: Check if there's an audio clip that EXTENDS BEYOND the current video clip end
+                // This handles cases where audio truly continues after video ends (e.g., trimmed video with longer audio)
+                const currentMediaState = getActiveMediaState();
+                if (currentMediaState.hasAudio && currentMediaState.audioClip) {
+                  const audioClipEnd = currentMediaState.audioClip.track_position + currentMediaState.audioClip.duration;
+                  // Only let audio continue if it extends past the current video clip's end
+                  if (audioClipEnd > currentClipEnd + 0.01) {
+                    console.log('[VideoPreview] Video ending but audio extends beyond video clip end - letting audio play', {
+                      videoClipEnd: currentClipEnd,
+                      audioClipEnd: audioClipEnd
+                    });
+                    return; // Don't interrupt, let audio continue
+                  }
                 }
 
-                // No audio currently playing - check if there's media ahead
+                // No audio extending beyond video - check if there's media ahead
                 if (hasMediaAfterTime(currentClipEnd)) {
                   const nextClip = findNextClip(currentClipEnd);
                   if (nextClip) {
-                    console.log('[VideoPreview] Jumping to next clip at', nextClip.clip.track_position);
+                    console.log('[VideoPreview] Video near end, jumping to next clip at', nextClip.clip.track_position);
                     playheadTime.set(nextClip.clip.track_position);
 
                     // CRITICAL: Ensure playback continues after jump
-                    // The clip change handler will start video if available
-                    // But if next clip is audio-only, we need to start audio manually
                     requestAnimationFrame(() => {
+                      if (videoElement && hasVideo && videoElement.paused) {
+                        console.log('[VideoPreview] Starting video for next clip');
+                        videoElement.play().catch(e => console.warn('Failed to start video:', e));
+                      }
                       if (audioElement && hasAudio && audioElement.paused) {
                         console.log('[VideoPreview] Starting audio for next clip');
                         audioElement.play().catch(e => console.warn('Failed to start audio:', e));
@@ -919,7 +976,7 @@
                   }
                 }
 
-                // Absolutely no more media - stop playback
+                // No more media - stop playback
                 console.log('[VideoPreview] No more media - stopping playback');
                 pause();
                 videoElement.currentTime = trimEnd;
@@ -959,6 +1016,41 @@
 
           // Mark audio as initialized after seeking is complete
           audioInitialized = true;
+        }}
+        on:ended={() => {
+          // Audio element reached its natural end - handle transition to next clip
+          console.log('[VideoPreview] Audio element ended event fired');
+
+          const audioClipInfo = getCurrentAudioClipInfo();
+          if (!audioClipInfo) return;
+
+          const currentClipEnd = audioClipInfo.clip.track_position + audioClipInfo.clip.duration;
+
+          // Check if there's any media after this point
+          if (hasMediaAfterTime(currentClipEnd)) {
+            const nextClip = findNextClip(currentClipEnd);
+            if (nextClip) {
+              console.log('[VideoPreview] Audio ended, jumping to next clip at:', nextClip.clip.track_position);
+              playheadTime.set(nextClip.clip.track_position);
+
+              // CRITICAL: Ensure playback continues after jump
+              requestAnimationFrame(() => {
+                if (videoElement && hasVideo && videoElement.paused) {
+                  console.log('[VideoPreview] Starting video for next clip');
+                  videoElement.play().catch(e => console.warn('Failed to start video:', e));
+                }
+                if (audioElement && hasAudio && audioElement.paused) {
+                  console.log('[VideoPreview] Starting audio for next clip');
+                  audioElement.play().catch(e => console.warn('Failed to start audio:', e));
+                }
+              });
+              return;
+            }
+          }
+
+          // No more media - stop playback
+          console.log('[VideoPreview] Audio ended, no more media, stopping');
+          pause();
         }}
         on:timeupdate={() => {
           // Don't process timeupdate if we're waiting to restore audio time
@@ -1000,15 +1092,15 @@
 
             // Check trim boundary
             const trimEnd = audioClipInfo.clip.trim_end || audioClipInfo.mediaFile.duration;
-            if (audioElement.currentTime >= trimEnd) {
-              // Audio clip ended - check if we should continue
+            if (audioElement.currentTime >= trimEnd - 0.1) {
+              // Audio clip approaching end (within 100ms) - check if we should continue
               const currentClipEnd = audioClipInfo.clip.track_position + audioClipInfo.clip.duration;
 
               // Check if there's any media after this point
               if (hasMediaAfterTime(currentClipEnd)) {
                 const nextClip = findNextClip(currentClipEnd);
                 if (nextClip) {
-                  console.log('[VideoPreview] Audio ended, jumping to next clip at:', nextClip.clip.track_position);
+                  console.log('[VideoPreview] Audio near end, jumping to next clip at:', nextClip.clip.track_position);
                   playheadTime.set(nextClip.clip.track_position);
 
                   // CRITICAL: Ensure playback continues after jump

@@ -7,12 +7,16 @@
   import MediaLibrary from "./lib/components/MediaLibrary.svelte";
   import ExportDialog from "./lib/components/ExportDialog.svelte";
   import RecordingPanel from "./lib/components/RecordingPanel.svelte";
+  import RecordingStatusPopup from "./lib/components/RecordingStatusPopup.svelte";
   import { initializeTimeline, saveTimelineProject, loadTimelineProject } from "./lib/stores/timelineStore";
+  import { isRecording } from "./lib/stores/recordingStore";
 
   let appVersion = "";
   let statusMessage = "";
   let exportDialog: ExportDialog;
   let recordingPanel: RecordingPanel;
+  let showRecordingPopup = false;
+  let hidePopupTimeout: number | null = null;
 
   // FPS tracking for main app
   let appFps = 0;
@@ -37,9 +41,27 @@
   }
 
   function handleRecord() {
-    if (recordingPanel) {
+    // Don't open panel if already recording
+    if (!$isRecording && recordingPanel) {
       recordingPanel.open();
     }
+  }
+
+  function handlePopupMouseEnter() {
+    // Clear any pending hide timeout when mouse enters popup area
+    if (hidePopupTimeout) {
+      clearTimeout(hidePopupTimeout);
+      hidePopupTimeout = null;
+    }
+    showRecordingPopup = true;
+  }
+
+  function handlePopupMouseLeave() {
+    // Delay hiding to allow smooth transition
+    hidePopupTimeout = setTimeout(() => {
+      showRecordingPopup = false;
+      hidePopupTimeout = null;
+    }, 200) as unknown as number;
   }
 
   onMount(async () => {
@@ -109,24 +131,37 @@
   </div>
 
   <header>
-    <h1>ClipForge</h1>
-    <p class="subtitle">Desktop Video Editor - Complete Application</p>
-    <p class="version">Version {appVersion}</p>
+    <div class="header-content">
+      <div class="title-section">
+        <h1>ClipForge</h1>
+        <div class="subtitle-group">
+          <p class="subtitle">Desktop Video Editor</p>
+          <p class="version">MVP</p>
+        </div>
+      </div>
+      <div
+        class="record-button-container"
+        on:mouseenter={handlePopupMouseEnter}
+        on:mouseleave={handlePopupMouseLeave}
+      >
+        <button
+          class="btn-record-screen"
+          class:recording={$isRecording}
+          on:click={handleRecord}
+        >
+          <span class="record-icon">●</span>
+          {$isRecording ? 'Recording...' : 'Record Screen'}
+        </button>
+        <RecordingStatusPopup
+          show={showRecordingPopup}
+          on:mouseenter={handlePopupMouseEnter}
+          on:mouseleave={handlePopupMouseLeave}
+        />
+      </div>
+    </div>
   </header>
 
   <section class="media-library-section">
-    <div class="section-header">
-      <div>
-        <h2>Media Library</h2>
-        <p class="description">
-          Import and manage your video files. Click "Import Media" to add videos, or "Record Screen" to capture your screen.
-        </p>
-      </div>
-      <button class="btn-record-screen" on:click={handleRecord}>
-        <span class="record-icon">●</span>
-        Record Screen
-      </button>
-    </div>
     <MediaLibrary />
   </section>
 
@@ -160,67 +195,6 @@
     <Timeline width={1200} height={400} />
   </section>
 
-  <section class="features">
-    <h3>Features Implemented</h3>
-    <div class="feature-grid">
-      <div class="feature">
-        <h4>✅ Media Library</h4>
-        <p>Import, manage, and organize video files with thumbnails</p>
-      </div>
-      <div class="feature">
-        <h4>✅ File Import</h4>
-        <p>Multi-file import with deduplication and metadata extraction</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Canvas Rendering</h4>
-        <p>Konva.js-based rendering for 60 FPS with 200+ clips</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Drag & Drop</h4>
-        <p>Drag clips to reposition within or between tracks</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Clip Trimming</h4>
-        <p>Resize handles on selected clips for trim adjustments</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Zoom & Scroll</h4>
-        <p>Mouse wheel zoom, Shift+wheel scroll</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Playhead Control</h4>
-        <p>Draggable playhead for time scrubbing</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Multi-track Support</h4>
-        <p>Video and Audio tracks with visual separation</p>
-      </div>
-      <div class="feature">
-        <h4>✅ State Management</h4>
-        <p>Svelte stores for reactive timeline state</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Selection System</h4>
-        <p>Click to select clips, visual feedback</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Search & Filter</h4>
-        <p>Search files by name and sort by various criteria</p>
-      </div>
-      <div class="feature">
-        <h4>✅ File Metadata</h4>
-        <p>Display resolution, codec, duration, and file size</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Video Export</h4>
-        <p>Export timeline to MP4 with presets (YouTube, Instagram, Twitter)</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Export Progress</h4>
-        <p>Real-time progress tracking with percentage, FPS, and ETA</p>
-      </div>
-    </div>
-  </section>
 
   <section class="instructions">
     <h3>How to Use</h3>
@@ -239,9 +213,9 @@
   </section>
 
   <footer>
-    <p>Built with Tauri 2.0 + Svelte 4 + Konva.js + Rust</p>
+    <p>Built with Tauri + Svelte + Konva.js + Rust</p>
     <p class="architecture">
-      Modules: Application Shell (1) • File System (2) • Timeline Engine (5) • Timeline UI (7) • Video Preview (8) • Export (6)
+      Casey Manos, GauntletAI Fall 2025)
     </p>
   </footer>
 </main>
@@ -263,49 +237,51 @@
     max-width: 1400px;
     margin: 0 auto;
     padding: 2rem;
-    position: relative;
-  }
-
-  .app-fps-overlay {
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    background: rgba(0, 0, 0, 0.85);
-    color: #0f0;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-    font-size: 14px;
-    font-weight: bold;
-    z-index: 9999;
-    pointer-events: none;
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(0, 255, 0, 0.3);
   }
 
   header {
-    text-align: center;
-    margin-bottom: 3rem;
+    margin-bottom: 1.5rem;
+    padding: 0;
+  }
+
+  .header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .title-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
   }
 
   h1 {
-    font-size: 3rem;
-    margin-bottom: 0.5rem;
+    font-size: 3.5rem;
+    margin: 0;
+    line-height: 1;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
+  .subtitle-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
   .subtitle {
-    font-size: 1.2rem;
+    font-size: 1rem;
     color: #aaa;
-    margin-bottom: 0.5rem;
+    margin: 0;
   }
 
   .version {
     color: #666;
     font-size: 0.9rem;
+    margin: 0;
   }
 
   .media-library-section {
@@ -481,6 +457,10 @@
     margin-bottom: 1rem;
   }
 
+  .record-button-container {
+    position: relative;
+  }
+
   .btn-record-screen {
     display: flex;
     align-items: center;
@@ -502,17 +482,37 @@
     box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3);
   }
 
-  .btn-record-screen .record-icon {
-    font-size: 1.2rem;
-    animation: pulse-subtle 2s ease-in-out infinite;
+  .btn-record-screen.recording {
+    animation: flash-recording 1.5s ease-in-out infinite;
   }
 
-  @keyframes pulse-subtle {
+  .btn-record-screen.recording .record-icon {
+    animation: pulse-fast 0.75s ease-in-out infinite;
+  }
+
+  .btn-record-screen .record-icon {
+    font-size: 1.2rem;
+  }
+
+  @keyframes flash-recording {
     0%, 100% {
-      opacity: 1;
+      background: #e53e3e;
+      box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3);
     }
     50% {
-      opacity: 0.7;
+      background: #c53030;
+      box-shadow: 0 4px 20px rgba(229, 62, 62, 0.6);
+    }
+  }
+
+  @keyframes pulse-fast {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.6;
+      transform: scale(0.85);
     }
   }
 </style>

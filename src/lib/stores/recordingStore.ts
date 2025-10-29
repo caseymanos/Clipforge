@@ -59,9 +59,9 @@ export const availableSources = writable<RecordingSource[]>([]);
 export const availableAudioDevices = writable<AudioDevice[]>([]);
 export const selectedSource = writable<string | null>(null);
 export const recordingConfig = writable<Partial<RecordingConfig>>({
-    framerate: 30,
-    quality: 'High',
-    capture_cursor: true,
+    fps: 30,
+    quality: 7,
+    show_cursor: true,
     audio_input: 'None',
 });
 
@@ -242,9 +242,9 @@ export async function startRecording(): Promise<boolean> {
 
         const fullConfig: RecordingConfig = {
             output_path: outputPath,
-            fps: config.framerate || 30,
-            quality: qualityValue,
-            show_cursor: config.capture_cursor !== undefined ? config.capture_cursor : true,
+            fps: config.fps || 30,
+            quality: typeof config.quality === 'number' ? config.quality : qualityValue,
+            show_cursor: config.show_cursor !== undefined ? config.show_cursor : true,
             audio_input: config.audio_input || 'None',
             audio_device_id: config.audio_device_id,
             crop_region: config.crop_region,

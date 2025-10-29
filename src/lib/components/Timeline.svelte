@@ -395,13 +395,14 @@
       listening: false,
     });
 
-    // Playhead handle
+    // Playhead handle with larger hit area for easier grabbing
     playheadHandle = new Konva.Circle({
       x: playheadX,
       y: RULER_HEIGHT / 2,
-      radius: 8,
+      radius: 12,  // Increased from 8 to 12 for easier grabbing
       fill: '#ff4444',
       draggable: true,
+      hitStrokeWidth: 20,  // Larger invisible hit area for easier clicking
       dragBoundFunc: (pos) => {
         // Simplified - just prevent negative positions
         return {

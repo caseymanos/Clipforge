@@ -109,7 +109,10 @@
     }
 
     const success = await startRecording();
-    if (!success && $recordingError) {
+    if (success) {
+      // Auto-close panel when recording starts successfully
+      showPanel = false;
+    } else if ($recordingError) {
       alert(`Failed to start recording: ${$recordingError}`);
     }
   }
@@ -252,8 +255,8 @@
                 {#each framerateOptions as fps}
                   <button
                     class="framerate-btn"
-                    class:active={$recordingConfig.framerate === fps}
-                    on:click={() => updateConfig('framerate', fps)}
+                    class:active={$recordingConfig.fps === fps}
+                    on:click={() => updateConfig('fps', fps)}
                     disabled={$isRecording}
                   >
                     {fps} fps
@@ -267,8 +270,8 @@
               <label>
                 <input
                   type="checkbox"
-                  checked={$recordingConfig.capture_cursor !== false}
-                  on:change={(e) => updateConfig('capture_cursor', e.target.checked)}
+                  checked={$recordingConfig.show_cursor !== false}
+                  on:change={(e) => updateConfig('show_cursor', e.target.checked)}
                   disabled={$isRecording}
                 />
                 <span>Show cursor in recording</span>
@@ -347,7 +350,7 @@
                 </div>
                 <div class="info-item">
                   <span class="label">FPS:</span>
-                  <span class="value">{$recordingConfig.framerate || 30}</span>
+                  <span class="value">{$recordingConfig.fps || 30}</span>
                 </div>
               </div>
 
