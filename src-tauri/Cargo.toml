@@ -44,6 +44,7 @@ which = "6.0"
 
 # Module 4: Screen Recording
 async-trait = "0.1"
+libc = "0.2"
 
 # Module 8: Video Preview (LRU cache for preview frames)
 lru = "0.12"

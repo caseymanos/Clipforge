@@ -7,9 +7,12 @@ import { videoDir } from '@tauri-apps/api/path';
 export type RecordingStateType = 'Idle' | 'Recording' | 'Paused' | 'Finalizing' | 'Error';
 
 export interface RecordingSource {
+    type: 'screen' | 'window';  // Matches Rust serde tag
     id: string;
     name: string;
-    source_type: 'Screen' | 'Window';
+    width?: number;  // For Screen type
+    height?: number; // For Screen type
+    app_name?: string; // For Window type
 }
 
 export interface AudioDevice {

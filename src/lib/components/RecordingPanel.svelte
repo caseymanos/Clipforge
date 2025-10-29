@@ -159,7 +159,7 @@
               >
                 {#each $availableSources as source}
                   <option value={source.id}>
-                    {source.source_type}: {source.name}
+                    {source.type === 'screen' ? 'Screen' : 'Window'}: {source.name}
                   </option>
                 {/each}
               </select>

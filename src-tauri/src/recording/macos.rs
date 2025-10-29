@@ -71,7 +71,7 @@ impl MacOSRecorder {
         // If we couldn't parse devices, add default screens
         if devices.is_empty() {
             info!("Could not parse FFmpeg devices, using defaults");
-            devices.push(("1".to_string(), "Capture screen 0".to_string()));
+            devices.push(("5".to_string(), "Capture screen 0".to_string()));
         }
 
         Ok(devices)
@@ -259,8 +259,8 @@ impl ScreenRecorder for MacOSRecorder {
         // Output file
         cmd.arg(&config.output_path);
 
-        // Redirect stderr to null (FFmpeg is very verbose)
-        cmd.stderr(Stdio::null());
+        // Capture stderr for debugging (FFmpeg outputs progress/errors there)
+        cmd.stderr(Stdio::piped());
         cmd.stdout(Stdio::null());
 
         info!("FFmpeg command: {:?}", cmd);
@@ -299,31 +299,49 @@ impl ScreenRecorder for MacOSRecorder {
             RecordingError::RecordingFailed("No output path found".to_string())
         })?;
 
-        // Send quit signal to FFmpeg (q + Enter)
-        // Note: This doesn't work well with stdin closed, so we'll just kill it
-        // FFmpeg should finalize the file on SIGTERM
+        // Send SIGINT to FFmpeg for graceful shutdown FIRST
+        // This allows FFmpeg to finalize the video file properly
+        let pid = process.id();
 
         drop(state); // Release lock before potentially blocking operation
 
-        // Try graceful termination first
-        // Note: Using process.kill() instead of SIGTERM for now
-        // TODO: Add libc dependency and use SIGTERM for graceful shutdown
-        let _ = process.kill();
+        #[cfg(unix)]
+        {
+            info!("Sending SIGINT to FFmpeg process {}", pid);
+            unsafe {
+                libc::kill(pid as i32, libc::SIGINT);
+            }
+        }
 
-        // Wait for process to exit (with timeout)
-        let wait_result = std::thread::spawn(move || {
-            process.wait()
-        }).join();
+        #[cfg(not(unix))]
+        {
+            // On non-Unix platforms, use kill() as fallback
+            let _ = process.kill();
+        }
+
+        // Now read stderr and wait for process to exit
+        let mut stderr_output = String::new();
+        if let Some(mut stderr) = process.stderr.take() {
+            use std::io::Read;
+            let _ = stderr.read_to_string(&mut stderr_output);
+        }
+
+        // Wait for process to exit
+        let wait_result = process.wait();
 
         match wait_result {
-            Ok(Ok(status)) => {
+            Ok(status) => {
                 info!("Recording stopped, exit status: {}", status);
+                if !stderr_output.is_empty() {
+                    info!("FFmpeg stderr (last 500 chars): {}",
+                        &stderr_output.chars().rev().take(500).collect::<String>().chars().rev().collect::<String>());
+                }
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 warn!("Error waiting for recording process: {}", e);
-            }
-            Err(_) => {
-                warn!("Recording process wait panicked");
+                if !stderr_output.is_empty() {
+                    warn!("FFmpeg stderr: {}", stderr_output);
+                }
             }
         }
 
