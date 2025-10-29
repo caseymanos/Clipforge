@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS media_files (
     file_size INTEGER NOT NULL,
     thumbnail_path TEXT,
     hash TEXT NOT NULL UNIQUE,      -- UNIQUE constraint creates automatic index
-    imported_at TEXT NOT NULL
+    imported_at TEXT NOT NULL,
+    proxy_path TEXT,                -- Path to H.264 proxy file for smooth editing
+    has_proxy INTEGER DEFAULT 0,    -- Boolean: 1 if proxy exists, 0 otherwise
+    proxy_status TEXT DEFAULT 'none' -- none | generating | ready | failed
 );
 
 -- Indexes for fast lookups

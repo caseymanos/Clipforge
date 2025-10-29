@@ -21,7 +21,7 @@ impl PreviewService {
     /// Create a new preview service
     pub fn new() -> Self {
         Self {
-            cache: Arc::new(PreviewCache::new(100)),
+            cache: Arc::new(PreviewCache::new(500)), // Increased cache for better performance
             ffmpeg_path: PathBuf::from("ffmpeg"),
         }
     }
@@ -169,8 +169,14 @@ impl PreviewService {
             video_path, time, temp_file
         );
 
-        // Build FFmpeg command
+        // Build FFmpeg command (optimized for preview performance)
+        // Limit preview resolution to 1280px width for faster processing
+        let preview_width = resolution.width.min(1280);
+        let preview_height = (preview_width as f64 / resolution.width as f64 * resolution.height as f64) as u32;
+
         let output = Command::new(&self.ffmpeg_path)
+            .arg("-hwaccel")
+            .arg("auto") // Use hardware acceleration if available (videotoolbox on macOS, etc.)
             .arg("-ss") // Seek before input (faster)
             .arg(format!("{}", time))
             .arg("-i")
@@ -178,9 +184,9 @@ impl PreviewService {
             .arg("-vframes")
             .arg("1") // Extract 1 frame
             .arg("-vf")
-            .arg(format!("scale={}:{}", resolution.width, resolution.height))
+            .arg(format!("scale={}:{}", preview_width, preview_height))
             .arg("-q:v")
-            .arg("2") // High quality JPEG
+            .arg("5") // Balanced quality/speed (was 2 - highest quality but slower)
             .arg("-f")
             .arg("image2")
             .arg(&temp_file)

@@ -308,15 +308,19 @@
     trackLayer.add(clipText);
   }
 
+  let isDraggingPlayhead = false;
+  let playheadLine: Konva.Line | null = null;
+  let playheadHandle: Konva.Circle | null = null;
+
   function renderPlayhead() {
-    if (!playheadLayer) return;
+    if (!playheadLayer || isDraggingPlayhead) return;  // Skip rendering during drag
 
     playheadLayer.destroyChildren();
 
     const playheadX = (currentPlayheadTime * currentPixelsPerSecond) - currentScrollOffset;
 
     // Playhead line
-    const line = new Konva.Line({
+    playheadLine = new Konva.Line({
       points: [playheadX, 0, playheadX, height],
       stroke: '#ff4444',
       strokeWidth: 2,
@@ -324,28 +328,47 @@
     });
 
     // Playhead handle
-    const handle = new Konva.Circle({
+    playheadHandle = new Konva.Circle({
       x: playheadX,
       y: RULER_HEIGHT / 2,
       radius: 8,
       fill: '#ff4444',
       draggable: true,
       dragBoundFunc: (pos) => {
+        // Simplified - just prevent negative positions
         return {
-          x: Math.max(0, Math.min(width, pos.x)),
+          x: Math.max(0, pos.x),
           y: RULER_HEIGHT / 2,
         };
       },
     });
 
-    handle.on('dragmove', (e) => {
+    playheadHandle.on('dragstart', () => {
+      isDraggingPlayhead = true;
+    });
+
+    playheadHandle.on('dragmove', (e) => {
       const newX = e.target.x();
       const newTime = (newX + currentScrollOffset) / currentPixelsPerSecond;
+
+      // Update line position manually without re-rendering
+      if (playheadLine) {
+        playheadLine.points([newX, 0, newX, height]);
+        playheadLayer.batchDraw();
+      }
+
+      // Update store (won't trigger re-render because of isDraggingPlayhead flag)
       playheadTime.set(Math.max(0, newTime));
     });
 
-    playheadLayer.add(line);
-    playheadLayer.add(handle);
+    playheadHandle.on('dragend', () => {
+      isDraggingPlayhead = false;
+      // Re-render to ensure everything is synced
+      renderPlayhead();
+    });
+
+    playheadLayer.add(playheadLine);
+    playheadLayer.add(playheadHandle);
     playheadLayer.batchDraw();
   }
 

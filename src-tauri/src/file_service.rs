@@ -11,7 +11,7 @@ use chrono::Utc;
 use crate::database::Database;
 use crate::thumbnail::ThumbnailGenerator;
 use crate::metadata::extract_metadata;
-use crate::models::{MediaFile, FileError};
+use crate::models::{MediaFile, FileError, ProxyStatus};
 
 /// Service for managing media file imports and library
 pub struct FileService {
@@ -92,6 +92,9 @@ impl FileService {
             thumbnail_path: Some(thumbnail_path),
             hash,
             imported_at: Utc::now(),
+            proxy_path: None,                   // No proxy initially
+            has_proxy: false,                   // No proxy initially
+            proxy_status: ProxyStatus::None,    // No proxy initially
         };
 
         // 7. Save to database (persistent)

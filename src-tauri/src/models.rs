@@ -15,6 +15,19 @@ pub struct MediaFile {
     pub thumbnail_path: Option<PathBuf>,
     pub hash: String,            // SHA-256 for deduplication
     pub imported_at: DateTime<Utc>,
+    pub proxy_path: Option<PathBuf>,    // H.264 proxy for smooth editing
+    pub has_proxy: bool,                // Whether proxy exists
+    pub proxy_status: ProxyStatus,      // Proxy generation status
+}
+
+/// Status of proxy file generation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyStatus {
+    None,       // No proxy requested
+    Generating, // Proxy being generated
+    Ready,      // Proxy ready to use
+    Failed,     // Proxy generation failed
 }
 
 /// Video resolution

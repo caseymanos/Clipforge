@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use crate::models::{MediaFile, Resolution, VideoCodec};
+use crate::models::{MediaFile, Resolution, VideoCodec, ProxyStatus};
 
 /// Database wrapper for media library storage
 pub struct Database {
@@ -46,6 +46,32 @@ impl Database {
     /// Initialize database schema
     fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.execute_batch(include_str!("schema.sql"))?;
+
+        // Run migrations for existing databases
+        Self::run_migrations(conn)?;
+
+        Ok(())
+    }
+
+    /// Run database migrations to add new columns to existing tables
+    fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
+        // Check if proxy columns exist, if not add them
+        let has_proxy_path = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('media_files') WHERE name='proxy_path'",
+            [],
+            |row| row.get::<_, i32>(0)
+        )? > 0;
+
+        if !has_proxy_path {
+            log::info!("Running migration: Adding proxy support columns");
+            conn.execute_batch(
+                "ALTER TABLE media_files ADD COLUMN proxy_path TEXT;
+                 ALTER TABLE media_files ADD COLUMN has_proxy INTEGER DEFAULT 0;
+                 ALTER TABLE media_files ADD COLUMN proxy_status TEXT DEFAULT 'none';"
+            )?;
+            log::info!("Migration complete: Proxy columns added");
+        }
+
         Ok(())
     }
 
@@ -72,8 +98,26 @@ impl Database {
             )
             .transpose()?;
 
+        let proxy_str = file.proxy_path.as_ref()
+            .map(|p| p.to_str()
+                .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Proxy path contains invalid UTF-8 characters"
+                    ))
+                ))
+            )
+            .transpose()?;
+
+        let proxy_status_str = match file.proxy_status {
+            ProxyStatus::None => "none",
+            ProxyStatus::Generating => "generating",
+            ProxyStatus::Ready => "ready",
+            ProxyStatus::Failed => "failed",
+        };
+
         conn.execute(
-            "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 file.id,
                 path_str,
@@ -87,6 +131,9 @@ impl Database {
                 thumbnail_str,
                 file.hash,
                 file.imported_at.to_rfc3339(),
+                proxy_str,
+                file.has_proxy as i32,
+                proxy_status_str,
             ],
         )?;
         Ok(())
@@ -171,6 +218,14 @@ impl Database {
 
     /// Convert database row to MediaFile struct
     fn row_to_media_file(row: &rusqlite::Row) -> Result<MediaFile, rusqlite::Error> {
+        let proxy_status_str: Option<String> = row.get(14).ok();
+        let proxy_status = match proxy_status_str.as_deref() {
+            Some("generating") => ProxyStatus::Generating,
+            Some("ready") => ProxyStatus::Ready,
+            Some("failed") => ProxyStatus::Failed,
+            _ => ProxyStatus::None,
+        };
+
         Ok(MediaFile {
             id: row.get(0)?,
             path: PathBuf::from(row.get::<_, String>(1)?),
@@ -194,6 +249,9 @@ impl Database {
                     rusqlite::types::Type::Text,
                     Box::new(e)
                 ))?,
+            proxy_path: row.get::<_, Option<String>>(12).ok().flatten().map(PathBuf::from),
+            has_proxy: row.get::<_, Option<i32>>(13).ok().flatten().unwrap_or(0) != 0,
+            proxy_status,
         })
     }
 
@@ -223,8 +281,26 @@ impl Database {
                 )
                 .transpose()?;
 
+            let proxy_str = file.proxy_path.as_ref()
+                .map(|p| p.to_str()
+                    .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "Proxy path contains invalid UTF-8 characters"
+                        ))
+                    ))
+                )
+                .transpose()?;
+
+            let proxy_status_str = match file.proxy_status {
+                ProxyStatus::None => "none",
+                ProxyStatus::Generating => "generating",
+                ProxyStatus::Ready => "ready",
+                ProxyStatus::Failed => "failed",
+            };
+
             tx.execute(
-                "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     file.id,
                     path_str,
@@ -238,11 +314,51 @@ impl Database {
                     thumbnail_str,
                     file.hash,
                     file.imported_at.to_rfc3339(),
+                    proxy_str,
+                    file.has_proxy as i32,
+                    proxy_status_str,
                 ],
             )?;
         }
 
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Update proxy status and path for a media file
+    pub fn update_proxy_status(
+        &self,
+        file_id: &str,
+        proxy_path: Option<PathBuf>,
+        status: ProxyStatus,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+
+        let proxy_str = proxy_path.as_ref()
+            .map(|p| p.to_str()
+                .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Proxy path contains invalid UTF-8 characters"
+                    ))
+                ))
+            )
+            .transpose()?;
+
+        let status_str = match status {
+            ProxyStatus::None => "none",
+            ProxyStatus::Generating => "generating",
+            ProxyStatus::Ready => "ready",
+            ProxyStatus::Failed => "failed",
+        };
+
+        let has_proxy = matches!(status, ProxyStatus::Ready) as i32;
+
+        conn.execute(
+            "UPDATE media_files SET proxy_path = ?1, has_proxy = ?2, proxy_status = ?3 WHERE id = ?4",
+            params![proxy_str, has_proxy, status_str, file_id],
+        )?;
+
         Ok(())
     }
 }

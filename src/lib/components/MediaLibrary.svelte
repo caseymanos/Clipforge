@@ -116,8 +116,11 @@
 
   function getThumbnailUrl(file: MediaFile): string {
     if (file.thumbnail_path) {
-      return convertFileSrc(file.thumbnail_path);
+      const url = convertFileSrc(file.thumbnail_path);
+      console.log('Thumbnail for', file.filename, ':', file.thumbnail_path, '-> URL:', url);
+      return url;
     }
+    console.log('No thumbnail_path for', file.filename);
     return ''; // Placeholder for files without thumbnails
   }
 </script>
