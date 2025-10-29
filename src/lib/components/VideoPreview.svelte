@@ -81,14 +81,24 @@
       hasVideo,
       hasAudio,
       isSameFile: isSameFile || false,
-      currentVideoUrl: currentVideoUrl ? 'present' : 'none',
-      currentAudioUrl: currentAudioUrl ? 'present' : 'none',
+      currentVideoUrl: currentVideoUrl || 'none',
+      currentAudioUrl: currentAudioUrl || 'none',
       currentTime
     });
   }
 
   // Keep backward compatibility with videoUrl for existing code
   $: videoUrl = currentVideoUrl;
+
+  // Debug video element state (separate reactive statement to avoid cycles)
+  $: if (videoElement) {
+    console.log('[VideoPreview] Video element state:', {
+      exists: true,
+      readyState: videoElement.readyState,
+      src: videoElement.src,
+      currentTime: videoElement.currentTime
+    });
+  }
 
   // Reactive clip info for display and scrubber positioning
   // Explicitly reference dependencies for Svelte reactivity
@@ -351,7 +361,7 @@
   }
 
   // Sync video element to clip-relative time (not timeline time!)
-  $: if (videoElement && !isComposite && clipInfo && hasVideo) {
+  $: if (videoElement && !isComposite && clipInfo && hasVideo && videoElement.readyState > 0) {
     // Explicitly reference currentTime for reactivity
     const _ = currentTime;
     const targetTime = clipInfo.clipRelativeTime;
@@ -367,7 +377,7 @@
   }
 
   // Sync audio element to clip-relative time
-  $: if (audioElement && !isComposite && clipInfo && hasAudio) {
+  $: if (audioElement && !isComposite && clipInfo && hasAudio && audioElement.readyState > 0) {
     // Explicitly reference currentTime for reactivity
     const _ = currentTime;
     const targetTime = clipInfo.clipRelativeTime;
@@ -379,33 +389,6 @@
     if (shouldUpdate) {
       console.log('[VideoPreview] Syncing audio to clip time:', targetTime);
       audioElement.currentTime = targetTime;
-    }
-  }
-
-  // Auto-play/pause video elements when isPlaying state changes
-  $: if (!isComposite) {
-    if (isPlaying) {
-      // Start playback for simple mode (video/audio elements)
-      if (videoElement && hasVideo && currentVideoUrl) {
-        if (videoElement.paused && videoElement.readyState >= 2) {
-          console.log('[VideoPreview] Auto-starting video playback');
-          videoElement.play().catch(err => console.error('Auto-play video error:', err));
-        }
-      }
-      if (audioElement && hasAudio && currentAudioUrl) {
-        if (audioElement.paused && audioElement.readyState >= 2) {
-          console.log('[VideoPreview] Auto-starting audio playback');
-          audioElement.play().catch(err => console.error('Auto-play audio error:', err));
-        }
-      }
-    } else {
-      // Pause playback
-      if (videoElement && !videoElement.paused) {
-        videoElement.pause();
-      }
-      if (audioElement && !audioElement.paused) {
-        audioElement.pause();
-      }
     }
   }
 
@@ -661,7 +644,7 @@
 
 <div class="video-preview">
   <div class="preview-container">
-    {#if !hasVideo && !hasAudio}
+    {#if !hasMediaAtPlayhead()}
       <!-- No media at playhead - show empty state -->
       <div class="no-media-view">
         <div class="no-media-icon">📹</div>
@@ -686,8 +669,21 @@
           muted={hasAudio}
           preload="metadata"
           playsinline
-          on:loadedmetadata={(e) => { duration = e.currentTarget.duration; }}
-          on:error={(e) => console.error('Video error:', e)}
+          on:loadedmetadata={(e) => {
+            duration = e.currentTarget.duration;
+            // Set initial time when video loads
+            if (clipInfo) {
+              e.currentTarget.currentTime = clipInfo.clipRelativeTime;
+            }
+            console.log('[VideoPreview] Video metadata loaded, duration:', duration, 'initial time:', e.currentTarget.currentTime, 'src:', e.currentTarget.src);
+          }}
+          on:loadeddata={() => console.log('[VideoPreview] Video data loaded, readyState:', videoElement?.readyState)}
+          on:canplay={() => console.log('[VideoPreview] Video can play')}
+          on:error={(e) => {
+            console.error('[VideoPreview] Video error:', e);
+            console.error('[VideoPreview] Video error target:', e.currentTarget);
+            console.error('[VideoPreview] Video src:', e.currentTarget?.src);
+          }}
         >
           <track kind="captions" />
         </video>
@@ -705,12 +701,20 @@
         src={hasAudio ? currentAudioUrl : ''}
         preload="metadata"
         style="display: none;"
+        on:loadedmetadata={(e) => {
+          // Set initial time when audio loads
+          if (clipInfo) {
+            e.currentTarget.currentTime = clipInfo.clipRelativeTime;
+          }
+          console.log('[VideoPreview] Audio metadata loaded, initial time:', e.currentTarget.currentTime);
+        }}
+        on:canplay={() => console.log('[VideoPreview] Audio can play')}
         on:error={(e) => console.error('Audio error:', e)}
       />
     {/if}
 
     <!-- Preview state indicators -->
-    {#if hasVideo || hasAudio}
+    {#if hasMediaAtPlayhead()}
       <div class="preview-indicators">
         <div class="indicator mode-indicator" class:composite={isComposite}>
           {isComposite ? '🎬 Composite' : '▶️ Direct'}

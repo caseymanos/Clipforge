@@ -17,6 +17,7 @@
     type Track,
     type Clip
   } from '../stores/timelineStore';
+  import { mediaLibraryStore } from '../stores/mediaLibraryStore';
 
   // Props
   export let width = 1200;
@@ -264,18 +265,24 @@
       }
     });
 
-    // Resize handles (trim functionality)
+    trackLayer.add(clipRect);
+    trackLayer.add(clipText);
+
+    // Resize handles (trim functionality) - add AFTER clip rect/text so they appear on top
     if (isSelected) {
       // Left handle
       const leftHandle = new Konva.Rect({
         x: clipX,
         y: trackY + 5,
-        width: 8,
+        width: 12,
         height: TRACK_HEIGHT - 10,
-        fill: '#ffffff',
-        opacity: 0.8,
+        fill: '#667eea',
+        opacity: 1.0,
         cursor: 'ew-resize',
         draggable: true,
+        shadowColor: 'black',
+        shadowBlur: 4,
+        shadowOpacity: 0.3,
         dragBoundFunc: (pos) => {
           const maxX = clipX + clipWidth - 20;
           return {
@@ -287,8 +294,6 @@
 
       leftHandle.on('dragmove', (e) => {
         const dx = e.target.x() - clipX;
-        const newTrimStart = clip.trim_start - (dx / currentPixelsPerSecond);
-        const newDuration = clip.duration + (dx / currentPixelsPerSecond);
 
         // Update visually
         clipRect.x(clipRect.x() + dx);
@@ -297,20 +302,41 @@
 
       leftHandle.on('dragend', (e) => {
         const dx = e.target.x() - clipX;
-        const newDuration = Math.max(0.5, clip.duration + (dx / currentPixelsPerSecond));
-        updateClipDuration(clip.id, newDuration);
+        const timeDelta = dx / currentPixelsPerSecond;
+
+        // Get source file to check bounds
+        const sourceFile = $mediaLibraryStore.find(f => f.id === clip.media_file_id);
+        if (!sourceFile) return;
+
+        // Calculate new trim_start and duration
+        let newTrimStart = clip.trim_start + timeDelta;
+
+        // Constrain: can't trim before start of source file (0)
+        newTrimStart = Math.max(0, newTrimStart);
+
+        // Constrain: can't extend beyond original clip end
+        const maxTrimStart = clip.trim_end - 0.5; // Must leave at least 0.5s
+        newTrimStart = Math.min(maxTrimStart, newTrimStart);
+
+        const newDuration = clip.trim_end - newTrimStart;
+
+        // Update both trim_start and duration
+        updateClipDuration(clip.id, newDuration, newTrimStart, clip.trim_end);
       });
 
       // Right handle
       const rightHandle = new Konva.Rect({
-        x: clipX + clipWidth - 8,
+        x: clipX + clipWidth - 12,
         y: trackY + 5,
-        width: 8,
+        width: 12,
         height: TRACK_HEIGHT - 10,
-        fill: '#ffffff',
-        opacity: 0.8,
+        fill: '#667eea',
+        opacity: 1.0,
         cursor: 'ew-resize',
         draggable: true,
+        shadowColor: 'black',
+        shadowBlur: 4,
+        shadowOpacity: 0.3,
         dragBoundFunc: (pos) => {
           return {
             x: Math.max(clipX + 20, pos.x),
@@ -320,22 +346,34 @@
       });
 
       rightHandle.on('dragmove', (e) => {
-        const newWidth = e.target.x() - clipX + 8;
+        const newWidth = e.target.x() - clipX + 12;
         clipRect.width(Math.max(20, newWidth));
       });
 
       rightHandle.on('dragend', (e) => {
-        const newWidth = e.target.x() - clipX + 8;
-        const newDuration = Math.max(0.5, newWidth / currentPixelsPerSecond);
-        updateClipDuration(clip.id, newDuration);
+        const newWidth = e.target.x() - clipX + 12;
+        let newDuration = Math.max(0.5, newWidth / currentPixelsPerSecond);
+
+        // Get source file to check bounds
+        const sourceFile = $mediaLibraryStore.find(f => f.id === clip.media_file_id);
+        if (!sourceFile) return;
+
+        // Calculate new trim_end based on new duration
+        let newTrimEnd = clip.trim_start + newDuration;
+
+        // Constrain: can't extend beyond source file duration
+        newTrimEnd = Math.min(sourceFile.duration, newTrimEnd);
+
+        // Recalculate duration based on constrained trim_end
+        newDuration = newTrimEnd - clip.trim_start;
+
+        // Update both duration and trim_end
+        updateClipDuration(clip.id, newDuration, clip.trim_start, newTrimEnd);
       });
 
       trackLayer.add(leftHandle);
       trackLayer.add(rightHandle);
     }
-
-    trackLayer.add(clipRect);
-    trackLayer.add(clipText);
   }
 
   let isDraggingPlayhead = false;
