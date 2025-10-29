@@ -4,6 +4,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { save } from '@tauri-apps/plugin-dialog';
   import { timelineStore } from '../stores/timelineStore';
+  import { mediaLibraryStore } from '../stores/mediaLibraryStore';
 
   // Export preset types
   interface ExportSettings {
@@ -85,8 +86,12 @@
       const timeline = $timelineStore;
       const settings = presets[selectedPreset][1];
 
-      // Mock media files map (in real app, this would come from file service)
-      const mediaFilesMap = {};
+      // Build media files map from media library store
+      const mediaFiles = $mediaLibraryStore;
+      const mediaFilesMap = mediaFiles.reduce((map, file) => {
+        map[file.id] = file;
+        return map;
+      }, {} as Record<string, any>);
 
       // Listen for progress events
       const unlisten = await listen('export-progress', (event) => {

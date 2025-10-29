@@ -169,10 +169,33 @@ impl ExportService {
         // Build filter_complex for timeline
         let filter_complex = self.build_filter_complex(timeline, &input_map, media_files)?;
 
+        info!("Generated filter_complex ({} bytes): {}", filter_complex.len(),
+            if filter_complex.len() > 500 {
+                format!("{}...", &filter_complex[..500])
+            } else {
+                filter_complex.clone()
+            });
+
         if !filter_complex.is_empty() {
             args.push("-filter_complex".to_string());
             args.push(filter_complex);
+
+            // Map the filtered outputs
+            args.push("-map".to_string());
+            args.push("[outv]".to_string());
+            args.push("-map".to_string());
+            args.push("[outa]".to_string());
         }
+
+        // Performance and stability flags
+        args.push("-threads".to_string());
+        args.push("0".to_string()); // Auto-detect optimal thread count
+
+        args.push("-max_muxing_queue_size".to_string());
+        args.push("1024".to_string()); // Prevent queue exhaustion
+
+        args.push("-max_interleave_delta".to_string());
+        args.push("500M".to_string()); // Reduce buffering
 
         // Output settings
         args.push("-c:v".to_string());
@@ -214,6 +237,79 @@ impl ExportService {
         let mut video_inputs = Vec::new();
         let mut audio_inputs = Vec::new();
 
+        // Count how many times each input is used for video and audio
+        let mut video_usage_count: HashMap<usize, usize> = HashMap::new();
+        let mut audio_usage_count: HashMap<usize, usize> = HashMap::new();
+
+        for track in &timeline.tracks {
+            if track.muted {
+                continue;
+            }
+
+            match track.track_type {
+                TrackType::Video | TrackType::Overlay => {
+                    for clip in &track.clips {
+                        if let Some(&input_idx) = input_map.get(&clip.media_file_id) {
+                            *video_usage_count.entry(input_idx).or_insert(0) += 1;
+                        }
+                    }
+                }
+                TrackType::Audio => {
+                    for clip in &track.clips {
+                        if let Some(&input_idx) = input_map.get(&clip.media_file_id) {
+                            *audio_usage_count.entry(input_idx).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Create split filters for inputs used multiple times
+        let mut video_split_map: HashMap<usize, Vec<String>> = HashMap::new();
+        let mut audio_split_map: HashMap<usize, Vec<String>> = HashMap::new();
+
+        for (&input_idx, &count) in &video_usage_count {
+            if count > 1 {
+                let split_outputs: Vec<String> = (0..count)
+                    .map(|i| format!("vsplit{}_tmp{}", input_idx, i))
+                    .collect();
+
+                let split_filter = format!(
+                    "[{}:v]split={}{}",
+                    input_idx,
+                    count,
+                    split_outputs.iter().map(|s| format!("[{}]", s)).collect::<Vec<_>>().join("")
+                );
+                filters.push(split_filter);
+                video_split_map.insert(input_idx, split_outputs);
+
+                info!("Created video split filter for input {} with {} outputs", input_idx, count);
+            }
+        }
+
+        for (&input_idx, &count) in &audio_usage_count {
+            if count > 1 {
+                let split_outputs: Vec<String> = (0..count)
+                    .map(|i| format!("asplit{}_tmp{}", input_idx, i))
+                    .collect();
+
+                let split_filter = format!(
+                    "[{}:a]asplit={}{}",
+                    input_idx,
+                    count,
+                    split_outputs.iter().map(|s| format!("[{}]", s)).collect::<Vec<_>>().join("")
+                );
+                filters.push(split_filter);
+                audio_split_map.insert(input_idx, split_outputs);
+
+                info!("Created audio split filter for input {} with {} outputs", input_idx, count);
+            }
+        }
+
+        // Track which split output to use next for each input
+        let mut video_split_counters: HashMap<usize, usize> = HashMap::new();
+        let mut audio_split_counters: HashMap<usize, usize> = HashMap::new();
+
         // Process each track
         for (track_idx, track) in timeline.tracks.iter().enumerate() {
             if track.muted {
@@ -231,10 +327,20 @@ impl ExportService {
 
                         let label = format!("v{}_{}", track_idx, clip_idx);
 
+                        // Determine source stream (either split output or direct input)
+                        let source_stream = if let Some(split_outputs) = video_split_map.get(input_idx) {
+                            let counter = video_split_counters.entry(*input_idx).or_insert(0);
+                            let stream = split_outputs[*counter].clone();
+                            *counter += 1;
+                            format!("[{}]", stream)
+                        } else {
+                            format!("[{}:v]", input_idx)
+                        };
+
                         // Trim and scale clip
                         let mut clip_filter = format!(
-                            "[{}:v]trim=start={}:duration={},setpts=PTS-STARTPTS",
-                            input_idx, clip.trim_start, clip.duration
+                            "{}trim=start={}:duration={},setpts=PTS-STARTPTS",
+                            source_stream, clip.trim_start, clip.duration
                         );
 
                         // Apply effects
@@ -263,9 +369,19 @@ impl ExportService {
 
                         let label = format!("a{}_{}", track_idx, clip_idx);
 
+                        // Determine source stream (either split output or direct input)
+                        let source_stream = if let Some(split_outputs) = audio_split_map.get(input_idx) {
+                            let counter = audio_split_counters.entry(*input_idx).or_insert(0);
+                            let stream = split_outputs[*counter].clone();
+                            *counter += 1;
+                            format!("[{}]", stream)
+                        } else {
+                            format!("[{}:a]", input_idx)
+                        };
+
                         let mut clip_filter = format!(
-                            "[{}:a]atrim=start={}:duration={},asetpts=PTS-STARTPTS",
-                            input_idx, clip.trim_start, clip.duration
+                            "{}atrim=start={}:duration={},asetpts=PTS-STARTPTS",
+                            source_stream, clip.trim_start, clip.duration
                         );
 
                         // Apply volume
@@ -352,8 +468,13 @@ impl ExportService {
         total_duration: f64,
         window: Window,
     ) -> Result<(), ExportError> {
+        info!("=== Starting FFmpeg Export ===");
+        info!("Total expected duration: {:.2} seconds", total_duration);
         info!("Executing FFmpeg with {} arguments", args.len());
+        info!("FFmpeg command: {} {}", self.ffmpeg_path, args.join(" "));
 
+        info!("Spawning FFmpeg process...");
+        let spawn_start = std::time::Instant::now();
         let mut child = TokioCommand::new(&self.ffmpeg_path)
             .args(&args)
             .stdout(Stdio::piped())
@@ -361,20 +482,52 @@ impl ExportService {
             .spawn()
             .map_err(|e| ExportError::FFmpegError(format!("Failed to spawn FFmpeg: {}", e)))?;
 
+        info!("FFmpeg process spawned successfully in {:?}", spawn_start.elapsed());
+
         let stdout = child.stdout.take()
             .ok_or_else(|| ExportError::FFmpegError("Failed to capture stdout".to_string()))?;
+
+        let stderr = child.stderr.take()
+            .ok_or_else(|| ExportError::FFmpegError("Failed to capture stderr".to_string()))?;
 
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
 
+        let stderr_reader = BufReader::new(stderr);
+        let mut stderr_lines = stderr_reader.lines();
+
         let cancel_flag = self.cancel_flag.clone();
 
+        // Spawn task to read stderr
+        let stderr_task = tokio::spawn(async move {
+            let mut error_output = Vec::new();
+            while let Ok(Some(line)) = stderr_lines.next_line().await {
+                log::debug!("FFmpeg stderr: {}", line);
+                error_output.push(line);
+            }
+            error_output
+        });
+
         // Read progress from stdout
+        let mut last_progress_log = std::time::Instant::now();
+        let mut last_progress_update = std::time::Instant::now();
+        let mut progress_count = 0;
+
+        info!("Starting to read progress from FFmpeg stdout...");
+
         while let Ok(Some(line)) = lines.next_line().await {
             // Check for cancellation
             if cancel_flag.load(Ordering::Relaxed) {
+                info!("Export cancelled by user");
                 let _ = child.kill().await;
                 return Err(ExportError::Cancelled);
+            }
+
+            // Warn if no progress for 15 seconds
+            if last_progress_update.elapsed().as_secs() > 15 {
+                log::warn!("No progress update for {} seconds - FFmpeg may be stalled",
+                    last_progress_update.elapsed().as_secs());
+                last_progress_update = std::time::Instant::now(); // Reset to avoid spam
             }
 
             // Parse progress line (format: "out_time_ms=123456")
@@ -391,6 +544,16 @@ impl ExportService {
                             time_remaining_secs: ((total_duration - current_time) / 30.0 * 30.0) as u64,
                         };
 
+                        progress_count += 1;
+                        last_progress_update = std::time::Instant::now();
+
+                        // Log progress every 2 seconds
+                        if last_progress_log.elapsed().as_secs() >= 2 {
+                            info!("Export progress: {:.1}% ({:.2}s / {:.2}s) [update #{}]",
+                                percentage, current_time, total_duration, progress_count);
+                            last_progress_log = std::time::Instant::now();
+                        }
+
                         // Emit progress event
                         let _ = window.emit("export-progress", progress);
                     }
@@ -398,14 +561,28 @@ impl ExportService {
             }
         }
 
+        info!("Finished reading FFmpeg stdout after {} progress updates", progress_count);
+
+        info!("Finished reading FFmpeg stdout, waiting for process to complete");
+
         // Wait for process to complete
         let status = child.wait().await
             .map_err(|e| ExportError::FFmpegError(format!("FFmpeg process failed: {}", e)))?;
 
+        // Get stderr output
+        let stderr_output = stderr_task.await.unwrap_or_default();
+
         if !status.success() {
-            return Err(ExportError::FFmpegError(
+            let error_message = if !stderr_output.is_empty() {
+                format!("FFmpeg exited with status: {}. Error output:\n{}",
+                    status,
+                    stderr_output.join("\n"))
+            } else {
                 format!("FFmpeg exited with status: {}", status)
-            ));
+            };
+
+            log::error!("FFmpeg error: {}", error_message);
+            return Err(ExportError::FFmpegError(error_message));
         }
 
         // Emit completion event

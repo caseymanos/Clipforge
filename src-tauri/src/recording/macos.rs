@@ -1,6 +1,6 @@
 // macOS screen recording implementation using FFmpeg with screen capture
 
-use super::{RecordingConfig, RecordingError, RecordingSource, RecordingState, ScreenRecorder};
+use super::{AudioInputType, RecordingConfig, RecordingError, RecordingSource, RecordingState, ScreenRecorder};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -183,6 +183,13 @@ impl ScreenRecorder for MacOSRecorder {
             ));
         }
 
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = config.output_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                RecordingError::SystemError(format!("Failed to create output directory: {}", e))
+            })?;
+        }
+
         // Build FFmpeg command for screen capture
         // Format: ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "1" output.mp4
 
@@ -201,10 +208,34 @@ impl ScreenRecorder for MacOSRecorder {
 
         // Input device (screen index)
         // Format: "video_device_index:audio_device_index" or just "video_index"
-        let device_input = if config.record_audio {
-            format!("{}:0", source.id()) // Video + audio device
-        } else {
-            format!("{}:none", source.id()) // Video only
+        // On macOS with AVFoundation:
+        // - "1:none" = screen only (no audio)
+        // - "1:0" = screen + first audio input device (usually microphone)
+        // - ":0" = audio only (for system audio, we'd need additional setup)
+        let device_input = match config.audio_input {
+            AudioInputType::None => {
+                format!("{}:none", source.id()) // Video only
+            }
+            AudioInputType::Microphone => {
+                // Use audio device ID if provided, otherwise default to 0 (first audio input)
+                let audio_id = config.audio_device_id.as_deref().unwrap_or("0");
+                format!("{}:{}", source.id(), audio_id) // Video + microphone
+            }
+            AudioInputType::SystemAudio => {
+                // System audio on macOS requires additional setup (e.g., BlackHole)
+                // For now, we'll use the first audio device as a fallback
+                // TODO: Implement proper system audio capture with virtual audio devices
+                warn!("System audio capture requires additional setup on macOS (e.g., BlackHole virtual audio device)");
+                format!("{}:0", source.id()) // Video + first audio device
+            }
+            AudioInputType::Both => {
+                // Recording both system audio and microphone requires audio mixing
+                // This is complex and typically requires virtual audio devices
+                // For now, we'll just capture microphone
+                // TODO: Implement audio mixing for system + microphone
+                warn!("Recording both system and microphone audio requires audio mixing setup");
+                format!("{}:0", source.id()) // Video + microphone (fallback)
+            }
         };
         cmd.arg("-i").arg(device_input);
 
@@ -214,7 +245,7 @@ impl ScreenRecorder for MacOSRecorder {
         cmd.arg("-crf").arg((51 - config.quality * 5).to_string()); // Convert 1-10 to CRF
 
         // Audio codec (if recording audio)
-        if config.record_audio {
+        if config.audio_input != AudioInputType::None {
             cmd.arg("-c:a").arg("aac");
             cmd.arg("-b:a").arg("128k");
         }

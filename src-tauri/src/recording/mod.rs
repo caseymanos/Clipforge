@@ -65,6 +65,21 @@ impl RecordingSource {
     }
 }
 
+/// Audio input type for recording
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AudioInputType {
+    None,
+    Microphone,
+    SystemAudio,
+    Both,
+}
+
+impl Default for AudioInputType {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 /// Recording configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConfig {
@@ -79,9 +94,13 @@ pub struct RecordingConfig {
     #[serde(default = "default_quality")]
     pub quality: u8,
 
-    /// Whether to record audio
-    #[serde(default = "default_audio")]
-    pub record_audio: bool,
+    /// Audio input type (default: None)
+    #[serde(default)]
+    pub audio_input: AudioInputType,
+
+    /// Optional audio device ID for specific device selection
+    #[serde(default)]
+    pub audio_device_id: Option<String>,
 
     /// Whether to show cursor
     #[serde(default = "default_cursor")]
@@ -90,7 +109,6 @@ pub struct RecordingConfig {
 
 fn default_fps() -> u32 { 30 }
 fn default_quality() -> u8 { 7 }
-fn default_audio() -> bool { false }
 fn default_cursor() -> bool { true }
 
 impl Default for RecordingConfig {
@@ -99,7 +117,8 @@ impl Default for RecordingConfig {
             output_path: PathBuf::new(),
             fps: default_fps(),
             quality: default_quality(),
-            record_audio: default_audio(),
+            audio_input: AudioInputType::default(),
+            audio_device_id: None,
             show_cursor: default_cursor(),
         }
     }

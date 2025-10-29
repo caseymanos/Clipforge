@@ -5,10 +5,26 @@
   import Timeline from "./lib/components/Timeline.svelte";
   import VideoPreview from "./lib/components/VideoPreview.svelte";
   import MediaLibrary from "./lib/components/MediaLibrary.svelte";
+  import ExportDialog from "./lib/components/ExportDialog.svelte";
+  import RecordingPanel from "./lib/components/RecordingPanel.svelte";
   import { initializeTimeline, saveTimelineProject, loadTimelineProject } from "./lib/stores/timelineStore";
 
   let appVersion = "";
   let statusMessage = "";
+  let exportDialog: ExportDialog;
+  let recordingPanel: RecordingPanel;
+
+  function handleExport() {
+    if (exportDialog) {
+      exportDialog.open();
+    }
+  }
+
+  function handleRecord() {
+    if (recordingPanel) {
+      recordingPanel.open();
+    }
+  }
 
   onMount(async () => {
     appVersion = await invoke("get_app_version");
@@ -75,10 +91,18 @@
   </header>
 
   <section class="media-library-section">
-    <h2>Media Library</h2>
-    <p class="description">
-      Import and manage your video files. Click "Import Media" to add videos, then double-click to add them to the timeline.
-    </p>
+    <div class="section-header">
+      <div>
+        <h2>Media Library</h2>
+        <p class="description">
+          Import and manage your video files. Click "Import Media" to add videos, or "Record Screen" to capture your screen.
+        </p>
+      </div>
+      <button class="btn-record-screen" on:click={handleRecord}>
+        <span class="record-icon">●</span>
+        Record Screen
+      </button>
+    </div>
     <MediaLibrary />
   </section>
 
@@ -102,6 +126,7 @@
       <div class="project-controls">
         <button class="btn-save" on:click={handleSaveProject}>Save Project</button>
         <button class="btn-load" on:click={handleLoadProject}>Load Project</button>
+        <button class="btn-export" on:click={handleExport}>Export Video</button>
       </div>
     </div>
     {#if statusMessage}
@@ -111,6 +136,67 @@
     <Timeline width={1200} height={400} />
   </section>
 
+  <section class="features">
+    <h3>Features Implemented</h3>
+    <div class="feature-grid">
+      <div class="feature">
+        <h4>✅ Media Library</h4>
+        <p>Import, manage, and organize video files with thumbnails</p>
+      </div>
+      <div class="feature">
+        <h4>✅ File Import</h4>
+        <p>Multi-file import with deduplication and metadata extraction</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Canvas Rendering</h4>
+        <p>Konva.js-based rendering for 60 FPS with 200+ clips</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Drag & Drop</h4>
+        <p>Drag clips to reposition within or between tracks</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Clip Trimming</h4>
+        <p>Resize handles on selected clips for trim adjustments</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Zoom & Scroll</h4>
+        <p>Mouse wheel zoom, Shift+wheel scroll</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Playhead Control</h4>
+        <p>Draggable playhead for time scrubbing</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Multi-track Support</h4>
+        <p>Video and Audio tracks with visual separation</p>
+      </div>
+      <div class="feature">
+        <h4>✅ State Management</h4>
+        <p>Svelte stores for reactive timeline state</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Selection System</h4>
+        <p>Click to select clips, visual feedback</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Search & Filter</h4>
+        <p>Search files by name and sort by various criteria</p>
+      </div>
+      <div class="feature">
+        <h4>✅ File Metadata</h4>
+        <p>Display resolution, codec, duration, and file size</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Video Export</h4>
+        <p>Export timeline to MP4 with presets (YouTube, Instagram, Twitter)</p>
+      </div>
+      <div class="feature">
+        <h4>✅ Export Progress</h4>
+        <p>Real-time progress tracking with percentage, FPS, and ETA</p>
+      </div>
+    </div>
+  </section>
 
   <section class="instructions">
     <h3>How to Use</h3>
@@ -124,16 +210,20 @@
       <li><strong>Zoom:</strong> Use mouse wheel to zoom in/out on the timeline</li>
       <li><strong>Scroll:</strong> Hold Shift + mouse wheel to scroll horizontally</li>
       <li><strong>Move playhead:</strong> Drag the red circle or click on the timeline</li>
+      <li><strong>Export video:</strong> Click "Export Video" to render timeline to MP4 with real-time progress</li>
     </ul>
   </section>
 
   <footer>
-    <p>Casey Manos | 2025 | GauntletAI</p>
+    <p>Built with Tauri 2.0 + Svelte 4 + Konva.js + Rust</p>
     <p class="architecture">
-      Built with Tauri + Svelte + Konva.js + Rust
+      Modules: Application Shell (1) • File System (2) • Timeline Engine (5) • Timeline UI (7) • Video Preview (8) • Export (6)
     </p>
   </footer>
 </main>
+
+<ExportDialog bind:this={exportDialog} />
+<RecordingPanel bind:this={recordingPanel} />
 
 <style>
   :global(body) {
@@ -322,6 +412,15 @@
     background: #38a169;
   }
 
+  .btn-export {
+    background: #ed8936;
+    color: white;
+  }
+
+  .btn-export:hover {
+    background: #dd6b20;
+  }
+
   .status-message {
     background: #1a1a1a;
     border: 1px solid #667eea;
@@ -330,5 +429,48 @@
     margin-bottom: 1rem;
     color: #aaa;
     font-size: 0.9rem;
+  }
+
+  /* Media Library section header with record button */
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+  }
+
+  .btn-record-screen {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: #e53e3e;
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .btn-record-screen:hover {
+    background: #c53030;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3);
+  }
+
+  .btn-record-screen .record-icon {
+    font-size: 1.2rem;
+    animation: pulse-subtle 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-subtle {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
   }
 </style>
