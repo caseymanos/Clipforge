@@ -52,8 +52,8 @@
         multiple: true,
         filters: [
           {
-            name: 'Video Files',
-            extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'm4v']
+            name: 'Media Files',
+            extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'm4v', 'mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a']
           }
         ]
       });
@@ -185,6 +185,14 @@
           <div class="thumbnail">
             {#if file.thumbnail_path}
               <img src={getThumbnailUrl(file)} alt={file.filename} />
+            {:else if file.media_type === 'audio'}
+              <div class="thumbnail-placeholder audio-placeholder">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 18V5l12-2v13"/>
+                  <circle cx="6" cy="18" r="3"/>
+                  <circle cx="18" cy="16" r="3"/>
+                </svg>
+              </div>
             {:else}
               <div class="thumbnail-placeholder">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor">

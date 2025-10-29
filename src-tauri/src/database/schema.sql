@@ -5,11 +5,12 @@ CREATE TABLE IF NOT EXISTS media_files (
     id TEXT PRIMARY KEY,
     path TEXT NOT NULL,
     filename TEXT NOT NULL,
+    media_type TEXT NOT NULL DEFAULT 'video',  -- video | audio | image
     duration REAL NOT NULL,
-    width INTEGER NOT NULL,
-    height INTEGER NOT NULL,
-    video_codec TEXT NOT NULL,
-    audio_codec TEXT NOT NULL,
+    width INTEGER,                  -- NULL for audio files
+    height INTEGER,                 -- NULL for audio files
+    video_codec TEXT,               -- NULL for audio-only files
+    audio_codec TEXT,               -- NULL for video-only files without audio
     file_size INTEGER NOT NULL,
     thumbnail_path TEXT,
     hash TEXT NOT NULL UNIQUE,      -- UNIQUE constraint creates automatic index

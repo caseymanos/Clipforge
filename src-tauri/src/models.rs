@@ -2,15 +2,25 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 
+/// Type of media file
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MediaType {
+    Video,  // Video file (with or without audio)
+    Audio,  // Audio-only file (.mp3, .wav, .aac, etc.)
+    Image,  // Image file (.jpg, .png, etc.) - for future use
+}
+
 /// Represents a media file in the library
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaFile {
     pub id: String,              // UUID
     pub path: PathBuf,
     pub filename: String,
+    pub media_type: MediaType,   // Type of media
     pub duration: f64,           // seconds
-    pub resolution: Resolution,
-    pub codec: VideoCodec,
+    pub resolution: Option<Resolution>,  // Optional for audio files
+    pub codec: MediaCodec,       // Video and/or audio codec info
     pub file_size: u64,          // bytes
     pub thumbnail_path: Option<PathBuf>,
     pub hash: String,            // SHA-256 for deduplication
@@ -37,22 +47,27 @@ pub struct Resolution {
     pub height: u32,
 }
 
-/// Video and audio codec information
+/// Media codec information (video and/or audio)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VideoCodec {
-    pub video: String,   // e.g., "h264", "hevc"
-    pub audio: String,   // e.g., "aac", "mp3"
+pub struct MediaCodec {
+    pub video: Option<String>,   // e.g., "h264", "hevc" (None for audio-only)
+    pub audio: Option<String>,   // e.g., "aac", "mp3" (None for video-only without audio)
 }
 
-/// Complete metadata extracted from a video file
+/// Legacy type alias for backwards compatibility
+pub type VideoCodec = MediaCodec;
+
+/// Complete metadata extracted from a media file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {
+    pub media_type: MediaType,          // Type of media
     pub duration: f64,
-    pub resolution: Resolution,
-    pub codec: VideoCodec,
+    pub resolution: Option<Resolution>, // None for audio files
+    pub codec: MediaCodec,
     pub bitrate: u64,
-    pub framerate: f64,
+    pub framerate: Option<f64>,         // None for audio files
     pub has_audio: bool,
+    pub has_video: bool,
 }
 
 /// Custom error types for file operations

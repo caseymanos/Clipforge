@@ -2,18 +2,21 @@ import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 
 // Types matching backend data structures
+export type MediaType = 'video' | 'audio' | 'image';
+
 export interface MediaFile {
     id: string;
     path: string;
     filename: string;
+    media_type: MediaType;
     duration: number;
     resolution: {
         width: number;
         height: number;
-    };
+    } | null;
     codec: {
-        video: string;
-        audio: string;
+        video: string | null;
+        audio: string | null;
     };
     file_size: number;
     thumbnail_path: string | null;
@@ -22,18 +25,20 @@ export interface MediaFile {
 }
 
 export interface FileMetadata {
+    media_type: MediaType;
     duration: number;
     resolution: {
         width: number;
         height: number;
-    };
+    } | null;
     codec: {
-        video: string;
-        audio: string;
+        video: string | null;
+        audio: string | null;
     };
     bitrate: number;
-    framerate: number;
+    framerate: number | null;
     has_audio: boolean;
+    has_video: boolean;
 }
 
 // Media library state

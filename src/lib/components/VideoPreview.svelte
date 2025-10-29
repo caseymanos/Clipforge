@@ -356,8 +356,11 @@
     const _ = currentTime;
     const targetTime = clipInfo.clipRelativeTime;
 
-    // Only update if video is ready and difference is significant (prevents jitter)
-    if (videoElement.readyState >= 2 && Math.abs(videoElement.currentTime - targetTime) > 0.05) {
+    // During playback: only update if difference is significant (prevents jitter)
+    // When paused: always update for immediate scrubbing response
+    const shouldUpdate = !isPlaying || Math.abs(videoElement.currentTime - targetTime) > 0.05;
+
+    if (shouldUpdate) {
       console.log('[VideoPreview] Syncing video to clip time:', targetTime);
       videoElement.currentTime = targetTime;
     }
@@ -369,10 +372,40 @@
     const _ = currentTime;
     const targetTime = clipInfo.clipRelativeTime;
 
-    // Only update if audio is ready and difference is significant (prevents jitter)
-    if (audioElement.readyState >= 2 && Math.abs(audioElement.currentTime - targetTime) > 0.05) {
+    // During playback: only update if difference is significant (prevents jitter)
+    // When paused: always update for immediate scrubbing response
+    const shouldUpdate = !isPlaying || Math.abs(audioElement.currentTime - targetTime) > 0.05;
+
+    if (shouldUpdate) {
       console.log('[VideoPreview] Syncing audio to clip time:', targetTime);
       audioElement.currentTime = targetTime;
+    }
+  }
+
+  // Auto-play/pause video elements when isPlaying state changes
+  $: if (!isComposite) {
+    if (isPlaying) {
+      // Start playback for simple mode (video/audio elements)
+      if (videoElement && hasVideo && currentVideoUrl) {
+        if (videoElement.paused && videoElement.readyState >= 2) {
+          console.log('[VideoPreview] Auto-starting video playback');
+          videoElement.play().catch(err => console.error('Auto-play video error:', err));
+        }
+      }
+      if (audioElement && hasAudio && currentAudioUrl) {
+        if (audioElement.paused && audioElement.readyState >= 2) {
+          console.log('[VideoPreview] Auto-starting audio playback');
+          audioElement.play().catch(err => console.error('Auto-play audio error:', err));
+        }
+      }
+    } else {
+      // Pause playback
+      if (videoElement && !videoElement.paused) {
+        videoElement.pause();
+      }
+      if (audioElement && !audioElement.paused) {
+        audioElement.pause();
+      }
     }
   }
 
@@ -628,7 +661,7 @@
 
 <div class="video-preview">
   <div class="preview-container">
-    {#if !hasMediaAtPlayhead()}
+    {#if !hasVideo && !hasAudio}
       <!-- No media at playhead - show empty state -->
       <div class="no-media-view">
         <div class="no-media-icon">📹</div>
@@ -677,7 +710,7 @@
     {/if}
 
     <!-- Preview state indicators -->
-    {#if hasMediaAtPlayhead()}
+    {#if hasVideo || hasAudio}
       <div class="preview-indicators">
         <div class="indicator mode-indicator" class:composite={isComposite}>
           {isComposite ? '🎬 Composite' : '▶️ Direct'}

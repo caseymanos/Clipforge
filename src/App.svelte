@@ -111,59 +111,6 @@
     <Timeline width={1200} height={400} />
   </section>
 
-  <section class="features">
-    <h3>Features Implemented</h3>
-    <div class="feature-grid">
-      <div class="feature">
-        <h4>✅ Media Library</h4>
-        <p>Import, manage, and organize video files with thumbnails</p>
-      </div>
-      <div class="feature">
-        <h4>✅ File Import</h4>
-        <p>Multi-file import with deduplication and metadata extraction</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Canvas Rendering</h4>
-        <p>Konva.js-based rendering for 60 FPS with 200+ clips</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Drag & Drop</h4>
-        <p>Drag clips to reposition within or between tracks</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Clip Trimming</h4>
-        <p>Resize handles on selected clips for trim adjustments</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Zoom & Scroll</h4>
-        <p>Mouse wheel zoom, Shift+wheel scroll</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Playhead Control</h4>
-        <p>Draggable playhead for time scrubbing</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Multi-track Support</h4>
-        <p>Video and Audio tracks with visual separation</p>
-      </div>
-      <div class="feature">
-        <h4>✅ State Management</h4>
-        <p>Svelte stores for reactive timeline state</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Selection System</h4>
-        <p>Click to select clips, visual feedback</p>
-      </div>
-      <div class="feature">
-        <h4>✅ Search & Filter</h4>
-        <p>Search files by name and sort by various criteria</p>
-      </div>
-      <div class="feature">
-        <h4>✅ File Metadata</h4>
-        <p>Display resolution, codec, duration, and file size</p>
-      </div>
-    </div>
-  </section>
 
   <section class="instructions">
     <h3>How to Use</h3>
@@ -181,9 +128,9 @@
   </section>
 
   <footer>
-    <p>Built with Tauri 2.0 + Svelte 4 + Konva.js + Rust</p>
+    <p>Casey Manos | 2025 | GauntletAI</p>
     <p class="architecture">
-      Modules: Application Shell (1) • File System (2) • Timeline Engine (5) • Timeline UI (7) • Video Preview (8)
+      Built with Tauri + Svelte + Konva.js + Rust
     </p>
   </footer>
 </main>

@@ -10,7 +10,7 @@ export default defineConfig({
 
   // Tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 5173,
+    port: 5174,
     strictPort: true,
     host: "localhost",
     watch: {

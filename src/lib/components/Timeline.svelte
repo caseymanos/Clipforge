@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import Konva from 'konva';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import {
     timelineStore,
     playheadTime,
@@ -11,6 +12,7 @@
     selectClip,
     updateClipDuration,
     addMediaFileToTimeline,
+    removeClip,
     type Timeline,
     type Track,
     type Clip
@@ -42,6 +44,13 @@
   let currentScrollOffset: number;
   let currentPlayheadTime: number;
   let currentSelectedClipId: string | null;
+
+  // Confirm dialog state
+  let showConfirmDialog = false;
+  let confirmMessage = '';
+  let confirmDialogX = 0;
+  let confirmDialogY = 0;
+  let pendingDeleteClipId: string | null = null;
 
   // Subscribe to stores
   const unsubTimeline = timelineStore.subscribe(value => { currentTimeline = value; renderTimeline(); });
@@ -97,6 +106,8 @@
   });
 
   function renderBackground() {
+    if (!backgroundLayer || !currentTimeline || !currentTimeline.tracks) return;
+
     backgroundLayer.destroyChildren();
 
     // Draw ruler background
@@ -140,7 +151,7 @@
   }
 
   function renderTimeline() {
-    if (!trackLayer) return;
+    if (!trackLayer || !currentTimeline || !currentTimeline.tracks) return;
 
     trackLayer.destroyChildren();
 
@@ -232,6 +243,25 @@
     // Click to select
     clipRect.on('click', () => {
       selectClip(clip.id);
+    });
+
+    // Right-click context menu
+    clipRect.on('contextmenu', (e) => {
+      e.evt.preventDefault();
+      selectClip(clip.id);
+
+      // Show custom confirm dialog near cursor (convert to screen coordinates)
+      const stageBox = container.getBoundingClientRect();
+      const mousePos = stage.getPointerPosition();
+      if (mousePos) {
+        const clipName = clip.name || `Clip ${clip.id.substring(0, 8)}`;
+        confirmMessage = `Delete "${clipName}"?`;
+        // Convert Konva canvas coordinates to screen coordinates
+        confirmDialogX = stageBox.left + mousePos.x;
+        confirmDialogY = stageBox.top + mousePos.y;
+        pendingDeleteClipId = clip.id;
+        showConfirmDialog = true;
+      }
     });
 
     // Resize handles (trim functionality)
@@ -404,6 +434,16 @@
     scrollOffset.set(Math.max(0, newOffset));
   }
 
+  // Handle confirm dialog response
+  function handleConfirmResponse(event: CustomEvent) {
+    if (event.detail.confirmed && pendingDeleteClipId) {
+      removeClip(pendingDeleteClipId);
+    }
+    // Reset state
+    pendingDeleteClipId = null;
+    showConfirmDialog = false;
+  }
+
   // Drag-and-drop handlers for adding media to timeline
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -447,6 +487,30 @@
       console.error('Failed to handle drop:', error);
     }
   }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    // Delete selected clip with Delete or Backspace key
+    if ((e.key === 'Delete' || e.key === 'Backspace') && currentSelectedClipId) {
+      e.preventDefault();
+
+      // Find the selected clip name
+      let clipName = '';
+      for (const track of currentTimeline.tracks) {
+        const clip = track.clips.find(c => c.id === currentSelectedClipId);
+        if (clip) {
+          clipName = clip.name || `Clip ${clip.id.substring(0, 8)}`;
+          break;
+        }
+      }
+
+      // Show custom confirm dialog at center of screen
+      confirmMessage = `Delete "${clipName}"?`;
+      confirmDialogX = window.innerWidth / 2;
+      confirmDialogY = window.innerHeight / 2;
+      pendingDeleteClipId = currentSelectedClipId;
+      showConfirmDialog = true;
+    }
+  }
 </script>
 
 <div class="timeline-container">
@@ -457,6 +521,7 @@
     on:wheel={handleScroll}
     on:dragover={handleDragOver}
     on:drop={handleDrop}
+    on:keydown={handleKeyDown}
     role="application"
     aria-label="Timeline editor"
     tabindex="0"
@@ -474,6 +539,14 @@
     </button>
   </div>
 </div>
+
+<ConfirmDialog
+  bind:show={showConfirmDialog}
+  message={confirmMessage}
+  x={confirmDialogX}
+  y={confirmDialogY}
+  on:confirm={handleConfirmResponse}
+/>
 
 <style>
   .timeline-container {
