@@ -80,13 +80,20 @@ impl MacOSRecorder {
 
 /// Extract device ID from FFmpeg device list line
 fn extract_device_id(line: &str) -> Option<String> {
-    // Format: "[AVFoundation indev @ 0x...] [1] Capture screen 0"
-    if let Some(start) = line.find('[') {
-        if let Some(end) = line[start + 1..].find(']') {
-            let id_str = &line[start + 1..start + 1 + end];
-            // Check if it's a number
-            if id_str.chars().all(|c| c.is_numeric()) {
-                return Some(id_str.to_string());
+    // Format: "[AVFoundation indev @ 0x...] [5] Capture screen 0"
+    // We need to find the SECOND bracket pair, which contains the device ID
+
+    // Find first closing bracket
+    if let Some(first_close) = line.find(']') {
+        // Search for second opening bracket after the first closing bracket
+        let remaining = &line[first_close + 1..];
+        if let Some(start) = remaining.find('[') {
+            if let Some(end) = remaining[start + 1..].find(']') {
+                let id_str = &remaining[start + 1..start + 1 + end];
+                // Check if it's a number
+                if id_str.chars().all(|c| c.is_numeric()) {
+                    return Some(id_str.to_string());
+                }
             }
         }
     }
@@ -112,15 +119,41 @@ impl ScreenRecorder for MacOSRecorder {
 
         let devices = Self::get_screen_devices()?;
 
+        // Initialize preview generator
+        let preview_generator = match crate::screen_preview::ScreenPreviewGenerator::new() {
+            Ok(gen) => Some(gen),
+            Err(e) => {
+                warn!("Failed to initialize screen preview generator: {:?}", e);
+                None
+            }
+        };
+
         let mut sources = Vec::new();
 
         for (id, name) in devices {
+            // Generate preview thumbnail for this screen
+            let preview_path = if let Some(ref generator) = preview_generator {
+                match generator.capture_screen_preview(&id).await {
+                    Ok(path) => {
+                        info!("Generated preview for screen {}: {:?}", id, path);
+                        path.to_str().map(|s| s.to_string())
+                    }
+                    Err(e) => {
+                        warn!("Failed to generate preview for screen {}: {:?}", id, e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             // Parse screen resolution (default to common resolution)
             sources.push(RecordingSource::Screen {
                 id: id.clone(),
                 name: name.clone(),
                 width: 1920,  // Default width
                 height: 1080, // Default height
+                preview_path,
             });
         }
 
@@ -132,6 +165,7 @@ impl ScreenRecorder for MacOSRecorder {
                 name: "Capture screen 0".to_string(),
                 width: 1920,
                 height: 1080,
+                preview_path: None,
             });
         }
 
@@ -243,6 +277,13 @@ impl ScreenRecorder for MacOSRecorder {
         cmd.arg("-c:v").arg("libx264");
         cmd.arg("-preset").arg("ultrafast"); // Fast encoding for real-time
         cmd.arg("-crf").arg((51 - config.quality * 5).to_string()); // Convert 1-10 to CRF
+
+        // Apply crop filter if region is specified
+        if let Some(crop) = &config.crop_region {
+            let crop_filter = format!("crop={}:{}:{}:{}", crop.width, crop.height, crop.x, crop.y);
+            cmd.arg("-vf").arg(crop_filter);
+            info!("Applying crop filter: {}x{} at ({}, {})", crop.width, crop.height, crop.x, crop.y);
+        }
 
         // Audio codec (if recording audio)
         if config.audio_input != AudioInputType::None {

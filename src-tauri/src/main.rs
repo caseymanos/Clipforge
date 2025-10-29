@@ -18,6 +18,7 @@ mod models;
 mod database;
 mod metadata;
 mod thumbnail;
+mod screen_preview;
 mod file_service;
 mod error_handler;
 

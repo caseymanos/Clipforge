@@ -14,6 +14,22 @@
   let exportDialog: ExportDialog;
   let recordingPanel: RecordingPanel;
 
+  // FPS tracking for main app
+  let appFps = 0;
+  let appFrameCount = 0;
+  let appLastFpsUpdate = performance.now();
+
+  function trackAppFps() {
+    appFrameCount++;
+    const now = performance.now();
+    if (now - appLastFpsUpdate >= 1000) {
+      appFps = Math.round(appFrameCount / ((now - appLastFpsUpdate) / 1000));
+      appFrameCount = 0;
+      appLastFpsUpdate = now;
+    }
+    requestAnimationFrame(trackAppFps);
+  }
+
   function handleExport() {
     if (exportDialog) {
       exportDialog.open();
@@ -36,6 +52,9 @@
     } catch (error) {
       console.error("Failed to initialize timeline:", error);
     }
+
+    // Start FPS tracking
+    trackAppFps();
   });
 
   async function handleSaveProject() {
@@ -84,6 +103,11 @@
 </script>
 
 <main class="container">
+  <!-- App FPS Overlay -->
+  <div class="app-fps-overlay">
+    {appFps} FPS
+  </div>
+
   <header>
     <h1>ClipForge</h1>
     <p class="subtitle">Desktop Video Editor - Complete Application</p>
@@ -239,6 +263,24 @@
     max-width: 1400px;
     margin: 0 auto;
     padding: 2rem;
+    position: relative;
+  }
+
+  .app-fps-overlay {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #0f0;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: bold;
+    z-index: 9999;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(0, 255, 0, 0.3);
   }
 
   header {

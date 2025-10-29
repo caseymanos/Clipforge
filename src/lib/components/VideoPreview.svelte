@@ -40,9 +40,47 @@
   let currentAudioUrl = '';
   let hasVideo = false;
   let hasAudio = false;
+  let previousAudioUrl = '';
+  let pendingAudioTime: number | null = null;
+  let audioInitialized = false;
+
+  // FPS tracking
+  let fps = 0;
+  let frameCount = 0;
+  let lastFpsUpdate = performance.now();
+  let showFps = true;
 
   // Sync with timeline playhead
   $: currentTime = $playheadTime;
+
+  // Global FPS tracking loop
+  function startFpsTracking() {
+    function trackFps() {
+      if (!isPlaying) {
+        fps = 0;
+        return;
+      }
+
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFpsUpdate >= 1000) {
+        fps = Math.round(frameCount / ((now - lastFpsUpdate) / 1000));
+        frameCount = 0;
+        lastFpsUpdate = now;
+      }
+
+      requestAnimationFrame(trackFps);
+    }
+    requestAnimationFrame(trackFps);
+  }
+
+  // Watch isPlaying and start FPS tracking when playback starts
+  $: if (isPlaying) {
+    startFpsTracking();
+  } else {
+    fps = 0;
+    frameCount = 0;
+  }
 
   // Determine if we need composite rendering
   $: {
@@ -62,7 +100,7 @@
     hasVideo = mediaState.hasVideo;
     hasAudio = mediaState.hasAudio;
     currentVideoUrl = getVideoClipUrl(currentTime);
-    currentAudioUrl = getAudioClipUrl(currentTime);
+    const newAudioUrl = getAudioClipUrl(currentTime);
 
     // Check if video and audio clips reference the same file
     // If so, only use video element with native audio (prevent resource contention)
@@ -71,11 +109,33 @@
     const isSameFile = videoClip && audioClip &&
                        videoClip.media_file_id === audioClip.media_file_id;
 
+    // IMPORTANT: Preserve audio time when switching from same-file to separate audio
+    // This happens when video ends but audio continues from the same file
+    if (previousAudioUrl === '' && newAudioUrl !== '' && !isSameFile && isPlaying && audioClip) {
+      // Switching from disabled audio to enabled audio during playback
+      // Calculate the correct audio time based on current timeline position
+      // Use audioClip from mediaState to avoid calling getCurrentAudioClip again
+      const offsetFromClipStart = currentTime - audioClip.track_position;
+      const speedAdjusted = offsetFromClipStart / (audioClip.speed || 1.0);
+      pendingAudioTime = speedAdjusted + (audioClip.trim_start || 0);
+      console.log('[VideoPreview] Preserving audio time during transition:', pendingAudioTime);
+    }
+
     if (isSameFile) {
       // Same file: use video element with native audio, disable separate audio element
       hasAudio = false;
       currentAudioUrl = '';
+    } else {
+      currentAudioUrl = newAudioUrl;
     }
+
+    // Reset audio initialized flag when URL changes
+    if (currentAudioUrl !== previousAudioUrl) {
+      audioInitialized = false;
+      console.log('[VideoPreview] Audio URL changed, resetting initialized flag');
+    }
+
+    previousAudioUrl = currentAudioUrl;
 
     console.log('[VideoPreview] Media state update:', {
       hasVideo,
@@ -83,7 +143,8 @@
       isSameFile: isSameFile || false,
       currentVideoUrl: currentVideoUrl ? 'present' : 'none',
       currentAudioUrl: currentAudioUrl ? 'present' : 'none',
-      currentTime
+      currentTime,
+      pendingAudioTime
     });
   }
 
@@ -239,6 +300,16 @@
         if (currentClipInfo?.clip) {
           const clipEndTime = currentClipInfo.clip.track_position + currentClipInfo.clip.duration;
           if (newTime >= clipEndTime) {
+            // Check if there's media after this clip
+            if (hasMediaAfterTime(clipEndTime)) {
+              const nextClip = findNextClip(clipEndTime);
+              if (nextClip) {
+                // Jump to next clip and continue
+                playheadTime.set(nextClip.clip.track_position);
+                return; // Continue animation loop
+              }
+            }
+            // No more media - stop
             pause();
             return;
           }
@@ -409,6 +480,12 @@
     }
   }
 
+  // Ensure audio element is paused when hasAudio is false (same-file mode)
+  $: if (audioElement && !hasAudio && !audioElement.paused) {
+    console.log('[VideoPreview] Pausing audio element (hasAudio is false)');
+    audioElement.pause();
+  }
+
   onMount(() => {
     if (autoPlay) {
       play();
@@ -518,10 +595,12 @@
         const clipEnd = clip.track_position + clip.duration;
 
         if (time >= clipStart && time < clipEnd) {
+          console.log(`[getAudioClipUrl] Found audio clip at time ${time}: clipStart=${clipStart}, clipEnd=${clipEnd}, media_file_id=${clip.media_file_id}`);
           return mediaFileSrcs[clip.media_file_id] || '';
         }
       }
     }
+    console.log(`[getAudioClipUrl] No audio clip found at time ${time}`);
     return '';
   }
 
@@ -607,6 +686,64 @@
     return false;
   }
 
+  // Find the next clip on ANY track that starts after a given time
+  function findNextClip(afterTime: number): { clip: any; track: any } | null {
+    if (!timeline?.tracks) return null;
+
+    let nearestClip = null;
+    let nearestTrack = null;
+    let nearestStartTime = Infinity;
+
+    console.log('[findNextClip] Looking for clip after time:', afterTime);
+
+    // Search all tracks for clips starting after afterTime
+    for (const track of timeline.tracks) {
+      if (track.muted) continue;
+
+      for (const clip of track.clips) {
+        const clipStart = clip.track_position;
+        const clipEnd = clip.track_position + clip.duration;
+
+        // Find clips that start after the given time (with small epsilon for floating point)
+        // Use >= to catch clips that start exactly at afterTime
+        if (clipStart >= afterTime - 0.001 && clipStart < nearestStartTime) {
+          console.log(`[findNextClip]   Found candidate: ${track.track_type} clip at ${clipStart}-${clipEnd}`);
+          nearestStartTime = clipStart;
+          nearestClip = clip;
+          nearestTrack = track;
+        }
+      }
+    }
+
+    if (nearestClip) {
+      console.log('[findNextClip] Selected nearest clip at:', nearestStartTime);
+    } else {
+      console.log('[findNextClip] No clip found after time:', afterTime);
+    }
+
+    return nearestClip ? { clip: nearestClip, track: nearestTrack } : null;
+  }
+
+  // Check if ANY media exists at or after a given time on ANY track
+  function hasMediaAfterTime(time: number): boolean {
+    if (!timeline?.tracks) return false;
+
+    for (const track of timeline.tracks) {
+      if (track.muted) continue;
+
+      for (const clip of track.clips) {
+        const clipStart = clip.track_position;
+        const clipEnd = clip.track_position + clip.duration;
+
+        // Check if clip overlaps or comes after this time
+        if (clipEnd > time) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // Get the current clip at playhead position
   function getCurrentClip() {
     if (!timeline?.tracks) return null;
@@ -621,6 +758,25 @@
         }
       }
     }
+    return null;
+  }
+
+  // Get the current AUDIO clip at playhead position
+  function getCurrentAudioClip() {
+    if (!timeline?.tracks) return null;
+
+    for (const track of timeline.tracks) {
+      if (track.track_type !== 'Audio' || track.muted) continue;
+
+      for (const clip of track.clips) {
+        if (currentTime >= clip.track_position &&
+            currentTime < clip.track_position + clip.duration) {
+          console.log(`[getCurrentAudioClip] Found audio clip at currentTime ${currentTime}: position=${clip.track_position}, duration=${clip.duration}, id=${clip.media_file_id}`);
+          return clip;
+        }
+      }
+    }
+    console.log(`[getCurrentAudioClip] No audio clip found at currentTime ${currentTime}`);
     return null;
   }
 
@@ -657,10 +813,38 @@
       codec: mediaFile.codec?.video || 'Unknown'
     };
   }
+
+  // Get current AUDIO clip info (independent of video)
+  function getCurrentAudioClipInfo(): {
+    clip: any;
+    mediaFile: any;
+    clipRelativeTime: number;
+    clipDuration: number;
+  } | null {
+    const clip = getCurrentAudioClip();
+    if (!clip) return null;
+
+    const mediaFile = $mediaLibraryStore.find(f => f.id === clip.media_file_id);
+    if (!mediaFile) return null;
+
+    return {
+      clip,
+      mediaFile,
+      clipRelativeTime: getClipRelativeTime(clip, currentTime),
+      clipDuration: clip.duration
+    };
+  }
 </script>
 
 <div class="video-preview">
   <div class="preview-container">
+    <!-- FPS Overlay -->
+    {#if showFps && isPlaying}
+      <div class="fps-overlay">
+        {fps} FPS
+      </div>
+    {/if}
+
     {#if !hasVideo && !hasAudio}
       <!-- No media at playhead - show empty state -->
       <div class="no-media-view">
@@ -702,6 +886,41 @@
               // Check trim boundary
               const trimEnd = clipInfo.clip.trim_end || clipInfo.mediaFile.duration;
               if (videoElement.currentTime >= trimEnd) {
+                // Video clip ended - check what to do next
+                const currentClipEnd = clipInfo.clip.track_position + clipInfo.clip.duration;
+
+                // Check if there's ANY media still playing at current position
+                const mediaState = getActiveMediaState();
+
+                // If audio is currently playing, don't interrupt it
+                if (mediaState.hasAudio) {
+                  console.log('[VideoPreview] Video ended but audio continues - letting audio play');
+                  return; // Don't pause, let audio continue naturally
+                }
+
+                // No audio currently playing - check if there's media ahead
+                if (hasMediaAfterTime(currentClipEnd)) {
+                  const nextClip = findNextClip(currentClipEnd);
+                  if (nextClip) {
+                    console.log('[VideoPreview] Jumping to next clip at', nextClip.clip.track_position);
+                    playheadTime.set(nextClip.clip.track_position);
+
+                    // CRITICAL: Ensure playback continues after jump
+                    // The clip change handler will start video if available
+                    // But if next clip is audio-only, we need to start audio manually
+                    requestAnimationFrame(() => {
+                      if (audioElement && hasAudio && audioElement.paused) {
+                        console.log('[VideoPreview] Starting audio for next clip');
+                        audioElement.play().catch(e => console.warn('Failed to start audio:', e));
+                      }
+                    });
+
+                    return; // Continue playback at next clip
+                  }
+                }
+
+                // Absolutely no more media - stop playback
+                console.log('[VideoPreview] No more media - stopping playback');
                 pause();
                 videoElement.currentTime = trimEnd;
               }
@@ -725,21 +944,93 @@
         src={hasAudio ? currentAudioUrl : ''}
         preload="metadata"
         style="display: none;"
+        on:loadedmetadata={() => {
+          // Restore audio time if we have a pending time (from same-file transition)
+          if (pendingAudioTime !== null && audioElement) {
+            console.log('[VideoPreview] Restoring audio time after load:', pendingAudioTime);
+            audioElement.currentTime = pendingAudioTime;
+            pendingAudioTime = null;
+
+            // Resume playback if we were playing
+            if (isPlaying) {
+              audioElement.play().catch(e => console.warn('Audio auto-play failed:', e));
+            }
+          }
+
+          // Mark audio as initialized after seeking is complete
+          audioInitialized = true;
+        }}
         on:timeupdate={() => {
-          if (clipInfo?.clip && audioElement && hasAudio) {
-            // Update playhead position during playback (only if video is not present)
-            if (isPlaying && !hasVideo) {
-              const audioTime = audioElement.currentTime;
-              const clip = clipInfo.clip;
-              // Convert audio element time back to timeline time
-              const offsetFromClipStart = (audioTime - (clip.trim_start || 0)) * (clip.speed || 1.0);
-              const timelineTime = clip.track_position + offsetFromClipStart;
-              playheadTime.set(timelineTime);
+          // Don't process timeupdate if we're waiting to restore audio time
+          if (pendingAudioTime !== null) {
+            return;
+          }
+
+          // CRITICAL: Only process if audio element is supposed to be active (hasAudio must be true)
+          // This prevents stale audio elements from driving the playhead
+          if (!hasAudio) {
+            return;
+          }
+
+          // CRITICAL: Don't process until audio is initialized (prevents HMR issues)
+          if (!audioInitialized) {
+            console.log('[VideoPreview] Audio timeupdate ignored - not initialized yet');
+            return;
+          }
+
+          // Get audio clip info independently (not relying on video clipInfo)
+          const audioClipInfo = getCurrentAudioClipInfo();
+
+          if (audioClipInfo && audioElement) {
+            // Update playhead position during playback
+            // Check if video is actively playing - if not, audio drives the playhead
+            if (isPlaying && !audioElement.paused) {
+              const videoIsPlaying = videoElement && !videoElement.paused && hasVideo;
+              if (!videoIsPlaying) {
+                // Video is not playing, so audio drives the playhead
+                const audioTime = audioElement.currentTime;
+                const clip = audioClipInfo.clip;
+                // Convert audio element time back to timeline time
+                const offsetFromClipStart = (audioTime - (clip.trim_start || 0)) * (clip.speed || 1.0);
+                const timelineTime = clip.track_position + offsetFromClipStart;
+                console.log('[VideoPreview] Audio driving playhead:', { audioTime, timelineTime, clipStart: clip.track_position });
+                playheadTime.set(timelineTime);
+              }
             }
 
             // Check trim boundary
-            const trimEnd = clipInfo.clip.trim_end || clipInfo.mediaFile.duration;
+            const trimEnd = audioClipInfo.clip.trim_end || audioClipInfo.mediaFile.duration;
             if (audioElement.currentTime >= trimEnd) {
+              // Audio clip ended - check if we should continue
+              const currentClipEnd = audioClipInfo.clip.track_position + audioClipInfo.clip.duration;
+
+              // Check if there's any media after this point
+              if (hasMediaAfterTime(currentClipEnd)) {
+                const nextClip = findNextClip(currentClipEnd);
+                if (nextClip) {
+                  console.log('[VideoPreview] Audio ended, jumping to next clip at:', nextClip.clip.track_position);
+                  playheadTime.set(nextClip.clip.track_position);
+
+                  // CRITICAL: Ensure playback continues after jump
+                  // The clip change handler will start video if available
+                  // But we need to ensure both video and audio start if needed
+                  requestAnimationFrame(() => {
+                    if (videoElement && hasVideo && videoElement.paused) {
+                      console.log('[VideoPreview] Starting video for next clip');
+                      videoElement.play().catch(e => console.warn('Failed to start video:', e));
+                    }
+                    if (audioElement && hasAudio && audioElement.paused) {
+                      console.log('[VideoPreview] Starting audio for next clip');
+                      audioElement.play().catch(e => console.warn('Failed to start audio:', e));
+                    }
+                  });
+
+                  return; // Continue playback at next clip
+                }
+              }
+
+              // No more media - stop playback
+              console.log('[VideoPreview] Audio ended, no more media, stopping');
               pause();
               audioElement.currentTime = trimEnd;
             }
@@ -822,6 +1113,22 @@
     position: relative;
     overflow: hidden;
     min-height: 400px;  /* Ensure minimum height */
+  }
+
+  .fps-overlay {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #0f0;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: bold;
+    z-index: 100;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
   }
 
   video {

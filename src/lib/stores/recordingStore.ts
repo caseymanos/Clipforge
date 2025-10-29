@@ -13,6 +13,7 @@ export interface RecordingSource {
     width?: number;  // For Screen type
     height?: number; // For Screen type
     app_name?: string; // For Window type
+    preview_path?: string; // Path to preview thumbnail image
 }
 
 export interface AudioDevice {
@@ -22,6 +23,13 @@ export interface AudioDevice {
 
 export type AudioInputType = 'None' | 'SystemAudio' | 'Microphone' | 'Both';
 
+export interface CropRegion {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
 export interface RecordingConfig {
     output_path: string;
     fps: number;
@@ -29,6 +37,7 @@ export interface RecordingConfig {
     audio_input: AudioInputType;
     audio_device_id?: string;
     show_cursor: boolean;
+    crop_region?: CropRegion;
 }
 
 export interface RecordingState {
@@ -238,6 +247,7 @@ export async function startRecording(): Promise<boolean> {
             show_cursor: config.capture_cursor !== undefined ? config.capture_cursor : true,
             audio_input: config.audio_input || 'None',
             audio_device_id: config.audio_device_id,
+            crop_region: config.crop_region,
         };
 
         await invoke('start_recording', {

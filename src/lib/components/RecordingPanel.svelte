@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { convertFileSrc } from '@tauri-apps/api/core';
   import {
     recordingState,
     availableSources,
@@ -21,13 +22,20 @@
     cleanupRecordingListeners,
     formatRecordingDuration,
     type AudioInputType,
+    type CropRegion,
   } from '../stores/recordingStore';
   import { importMediaFile } from '../stores/mediaLibraryStore';
+  import CropEditor from './CropEditor.svelte';
 
   // Component state
   let showPanel = false;
   let permissionCheckDone = false;
   let showPermissionDialog = false;
+
+  // Crop region state
+  let enableCrop = false;
+  let currentCropRegion: CropRegion | null = null;
+  let showCropEditor = false;
 
   // Quality options
   const qualityOptions = ['Low', 'Medium', 'High', 'Ultra'];
@@ -79,7 +87,27 @@
     }
   }
 
+  function handleOpenCropEditor() {
+    showCropEditor = true;
+  }
+
+  function handleCropApply(event: CustomEvent<CropRegion>) {
+    currentCropRegion = event.detail;
+    showCropEditor = false;
+  }
+
+  function handleCropCancel() {
+    showCropEditor = false;
+  }
+
   async function handleStart() {
+    // Update config with crop region if enabled
+    if (enableCrop && currentCropRegion) {
+      updateConfig('crop_region', currentCropRegion);
+    } else {
+      updateConfig('crop_region', undefined);
+    }
+
     const success = await startRecording();
     if (!success && $recordingError) {
       alert(`Failed to start recording: ${$recordingError}`);
@@ -113,6 +141,9 @@
   onDestroy(() => {
     cleanupRecordingListeners();
   });
+
+  // Get the currently selected source for the crop editor
+  $: currentSource = $availableSources.find(s => s.id === $selectedSource);
 </script>
 
 {#if showPanel}
@@ -149,20 +180,37 @@
         <!-- Recording Controls -->
         <div class="recording-controls">
           {#if !$isRecording && !$isFinalizing}
-            <!-- Source Selection -->
+            <!-- Source Selection - Visual Grid -->
             <div class="section">
-              <label for="source-select">Recording Source</label>
-              <select
-                id="source-select"
-                bind:value={$selectedSource}
-                disabled={$isRecording}
-              >
+              <label>Recording Source</label>
+              <div class="sources-grid">
                 {#each $availableSources as source}
-                  <option value={source.id}>
-                    {source.type === 'screen' ? 'Screen' : 'Window'}: {source.name}
-                  </option>
+                  <button
+                    class="source-card"
+                    class:selected={$selectedSource === source.id}
+                    on:click={() => selectedSource.set(source.id)}
+                    disabled={$isRecording}
+                  >
+                    {#if source.preview_path}
+                      <img
+                        src={convertFileSrc(source.preview_path)}
+                        alt={source.name}
+                        class="source-preview"
+                      />
+                    {:else}
+                      <div class="source-placeholder">
+                        {source.type === 'screen' ? '🖥️' : '🪟'}
+                      </div>
+                    {/if}
+                    <div class="source-info">
+                      <div class="source-name">{source.name}</div>
+                      {#if source.width && source.height}
+                        <div class="source-resolution">{source.width}×{source.height}</div>
+                      {/if}
+                    </div>
+                  </button>
                 {/each}
-              </select>
+              </div>
             </div>
 
             <!-- Audio Input -->
@@ -225,6 +273,38 @@
                 />
                 <span>Show cursor in recording</span>
               </label>
+            </div>
+
+            <!-- Crop Region -->
+            <div class="section">
+              <label class="crop-toggle">
+                <input
+                  type="checkbox"
+                  bind:checked={enableCrop}
+                  disabled={$isRecording}
+                />
+                <span>Record specific region</span>
+              </label>
+
+              {#if enableCrop}
+                <div class="crop-controls">
+                  <button
+                    class="btn-crop-editor"
+                    on:click={handleOpenCropEditor}
+                    disabled={$isRecording || !$selectedSource}
+                  >
+                    {currentCropRegion ? 'Edit Crop Region' : 'Select Crop Region'}
+                  </button>
+
+                  {#if currentCropRegion}
+                    <div class="crop-info-compact">
+                      <span class="crop-info-text">
+                        {currentCropRegion.width} × {currentCropRegion.height}px at ({currentCropRegion.x}, {currentCropRegion.y})
+                      </span>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             </div>
 
             <!-- Start Recording Button -->
@@ -296,6 +376,17 @@
       {/if}
     </div>
   </div>
+{/if}
+
+<!-- Crop Editor Modal -->
+{#if currentSource}
+  <CropEditor
+    source={currentSource}
+    initialCropRegion={currentCropRegion}
+    bind:show={showCropEditor}
+    on:apply={handleCropApply}
+    on:cancel={handleCropCancel}
+  />
 {/if}
 
 <style>
@@ -437,6 +528,135 @@
 
   .checkbox-section span {
     color: #fff;
+  }
+
+  /* Sources Grid */
+  .sources-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+  }
+
+  .source-card {
+    display: flex;
+    flex-direction: column;
+    background: #2d2d2d;
+    border: 2px solid #3d3d3d;
+    border-radius: 8px;
+    padding: 0;
+    cursor: pointer;
+    transition: all 0.2s;
+    overflow: hidden;
+  }
+
+  .source-card:hover:not(:disabled) {
+    background: #3d3d3d;
+    border-color: #667eea;
+  }
+
+  .source-card.selected {
+    border-color: #667eea;
+    background: #3d3d3d;
+  }
+
+  .source-card:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .source-preview {
+    width: 100%;
+    height: 100px;
+    object-fit: cover;
+    background: #1a1a1a;
+  }
+
+  .source-placeholder {
+    width: 100%;
+    height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1a1a1a;
+    font-size: 3rem;
+  }
+
+  .source-info {
+    padding: 0.75rem;
+  }
+
+  .source-name {
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .source-resolution {
+    color: #aaa;
+    font-size: 0.75rem;
+  }
+
+  /* Crop Controls */
+  .crop-toggle {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+
+  .crop-toggle input[type="checkbox"] {
+    margin-right: 0.5rem;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+  }
+
+  .crop-toggle span {
+    color: #fff;
+  }
+
+  .crop-controls {
+    margin-top: 1rem;
+  }
+
+  .btn-crop-editor {
+    width: 100%;
+    padding: 0.75rem 1.5rem;
+    background: #667eea;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+
+  .btn-crop-editor:hover:not(:disabled) {
+    background: #5568d3;
+  }
+
+  .btn-crop-editor:disabled {
+    background: #3d3d3d;
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .crop-info-compact {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: #2d2d2d;
+    border-radius: 4px;
+    text-align: center;
+  }
+
+  .crop-info-text {
+    color: #aaa;
+    font-size: 0.85rem;
   }
 
   .actions {
