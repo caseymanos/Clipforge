@@ -8,6 +8,7 @@
   import ExportDialog from "./lib/components/ExportDialog.svelte";
   import RecordingPanel from "./lib/components/RecordingPanel.svelte";
   import RecordingStatusPopup from "./lib/components/RecordingStatusPopup.svelte";
+  import SubtitleEditor from "./lib/components/SubtitleEditor.svelte";
   import { initializeTimeline, saveTimelineProject, loadTimelineProject } from "./lib/stores/timelineStore";
   import { isRecording } from "./lib/stores/recordingStore";
 
@@ -173,6 +174,14 @@
     <VideoPreview />
   </section>
 
+  <section class="subtitle-section">
+    <h2>Subtitles & Transcription</h2>
+    <p class="description">
+      AI-powered subtitle generation using OpenAI Whisper. Transcribe your timeline audio, edit subtitles, and export to SRT format.
+    </p>
+    <SubtitleEditor />
+  </section>
+
   <section class="timeline-section">
     <div class="timeline-header">
       <div>
@@ -289,6 +298,10 @@
   }
 
   .preview-section {
+    margin-bottom: 3rem;
+  }
+
+  .subtitle-section {
     margin-bottom: 3rem;
   }
 

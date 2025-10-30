@@ -1,9 +1,11 @@
 use crate::models::{
     Timeline, Effect, EffectType, TrackType,
     ExportSettings, ExportProgress, ExportError, MediaFile,
+    SubtitleTrack,
 };
+use crate::ffmpeg_utils;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
@@ -21,38 +23,18 @@ pub struct ExportService {
 impl ExportService {
     /// Create a new export service
     pub fn new() -> Result<Self, ExportError> {
-        // Verify FFmpeg is available
-        let ffmpeg_path = Self::find_ffmpeg()?;
+        // Use shared utility to find FFmpeg
+        let ffmpeg_path = ffmpeg_utils::find_ffmpeg_path()
+            .map_err(|e| ExportError::FFmpegError(e))?;
+
+        let ffmpeg_path_str = ffmpeg_path.to_str()
+            .ok_or_else(|| ExportError::FFmpegError("Invalid FFmpeg path".to_string()))?
+            .to_string();
 
         Ok(Self {
-            ffmpeg_path,
+            ffmpeg_path: ffmpeg_path_str,
             cancel_flag: Arc::new(AtomicBool::new(false)),
         })
-    }
-
-    /// Find FFmpeg executable
-    fn find_ffmpeg() -> Result<String, ExportError> {
-        // Try system FFmpeg first
-        if let Ok(output) = Command::new("ffmpeg").arg("-version").output() {
-            if output.status.success() {
-                return Ok("ffmpeg".to_string());
-            }
-        }
-
-        // Check common installation paths
-        let paths = vec![
-            "/usr/local/bin/ffmpeg",
-            "/opt/homebrew/bin/ffmpeg",
-            "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
-        ];
-
-        for path in paths {
-            if Path::new(path).exists() {
-                return Ok(path.to_string());
-            }
-        }
-
-        Err(ExportError::FFmpegError("FFmpeg not found in system PATH".to_string()))
     }
 
     /// Export a timeline to a video file
@@ -399,12 +381,47 @@ impl ExportService {
 
         // Concatenate all video inputs
         if !video_inputs.is_empty() {
+            let video_label = if timeline.subtitle_enabled && timeline.subtitle_track.is_some() {
+                "[vconcat]" // Intermediate label for subtitle burning
+            } else {
+                "[outv]" // Final output if no subtitles
+            };
+
             let concat_filter = format!(
-                "{}concat=n={}:v=1:a=0[outv]",
+                "{}concat=n={}:v=1:a=0{}",
                 video_inputs.iter().map(|l| format!("[{}]", l)).collect::<Vec<_>>().join(""),
-                video_inputs.len()
+                video_inputs.len(),
+                video_label
             );
             filters.push(concat_filter);
+
+            // Add subtitle burning if enabled
+            if timeline.subtitle_enabled {
+                if let Some(ref subtitle_track) = timeline.subtitle_track {
+                    // Generate SRT content
+                    let srt_content = self.generate_srt_content(subtitle_track)?;
+
+                    // Create temporary SRT file path
+                    let temp_srt = std::env::temp_dir().join(format!("clipforge_subtitles_{}.srt",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()));
+
+                    // Write SRT file
+                    std::fs::write(&temp_srt, srt_content)
+                        .map_err(|e| ExportError::OutputError(format!("Failed to write SRT: {}", e)))?;
+
+                    // Add subtitles filter
+                    let subtitle_filter = format!(
+                        "[vconcat]subtitles={}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=1,MarginV=20'[outv]",
+                        temp_srt.to_string_lossy().replace("\\", "\\\\").replace(":", "\\:")
+                    );
+                    filters.push(subtitle_filter);
+
+                    info!("Added subtitle burning filter with {} segments", subtitle_track.segments.len());
+                }
+            }
         }
 
         // Concatenate all audio inputs
@@ -459,6 +476,36 @@ impl ExportService {
         }
 
         Ok(filters.join(","))
+    }
+
+    /// Generate SRT content from subtitle track
+    fn generate_srt_content(&self, track: &SubtitleTrack) -> Result<String, ExportError> {
+        let mut srt = String::new();
+
+        for (idx, segment) in track.segments.iter().enumerate() {
+            // Index (1-based)
+            srt.push_str(&format!("{}\n", idx + 1));
+
+            // Timecode format: HH:MM:SS,mmm --> HH:MM:SS,mmm
+            let start = self.format_srt_timestamp(segment.start_time);
+            let end = self.format_srt_timestamp(segment.end_time);
+            srt.push_str(&format!("{} --> {}\n", start, end));
+
+            // Text
+            srt.push_str(&format!("{}\n\n", segment.text));
+        }
+
+        Ok(srt)
+    }
+
+    /// Format timestamp for SRT format
+    fn format_srt_timestamp(&self, seconds: f64) -> String {
+        let hours = (seconds / 3600.0) as u32;
+        let minutes = ((seconds % 3600.0) / 60.0) as u32;
+        let secs = (seconds % 60.0) as u32;
+        let millis = ((seconds % 1.0) * 1000.0) as u32;
+
+        format!("{:02}:{:02}:{:02},{:03}", hours, minutes, secs, millis)
     }
 
     /// Execute FFmpeg command with progress tracking
