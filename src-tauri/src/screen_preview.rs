@@ -58,28 +58,38 @@ impl ScreenPreviewGenerator {
 
         log::debug!("Capturing screen preview for device {}", device_id);
 
-        // FFmpeg command to capture single frame from AVFoundation device
-        // -f avfoundation: Use macOS screen capture
-        // -i "{device_id}:none": Video device ID with no audio
-        // -vframes 1: Capture only 1 frame
-        // -vf "scale=320:-1": Scale to 320px width, preserve aspect ratio
-        // -q:v 2: High quality JPEG (1-31 scale, lower is better)
-        // -y: Overwrite if exists
-        let input_device = format!("{}:none", device_id);
+        // Determine if this is a camera device (numeric ID) or screen device (starts with "Capture screen")
+        let is_camera = device_id.parse::<u32>().is_ok();
 
-        let status = Command::new(&self.ffmpeg_path)
-            .args([
-                "-f", "avfoundation",
-                "-t", "0.1",             // 100ms timeout to prevent hanging
-                "-i", &input_device,
-                "-vframes", "1",
-                "-vf", "scale=320:-1",  // Width 320px, height auto
-                "-q:v", "2",             // High quality JPEG
-                "-y",                    // Overwrite if exists
-                output_path_str,
-            ])
-            .output()
-            .map_err(ThumbnailError::IoError)?;
+        // Format device name correctly for AVFoundation
+        // Cameras use numeric IDs, screens need "Capture screen {id}" format
+        let input_device = if is_camera {
+            format!("{}:none", device_id)
+        } else {
+            format!("Capture screen {}:none", device_id)
+        };
+
+        // Build FFmpeg command - cameras need different parameters than screens
+        let mut cmd = Command::new(&self.ffmpeg_path);
+        cmd.arg("-f").arg("avfoundation");
+
+        if is_camera {
+            // For cameras: specify explicit framerate that most cameras support
+            cmd.arg("-framerate").arg("30");
+            cmd.arg("-t").arg("1");  // Capture for 1 second
+        } else {
+            // For screens: use short capture timeout
+            cmd.arg("-t").arg("0.1");
+        }
+
+        cmd.arg("-i").arg(&input_device);
+        cmd.arg("-vframes").arg("1");
+        cmd.arg("-vf").arg("scale=320:-1");  // Width 320px, height auto
+        cmd.arg("-q:v").arg("2");             // High quality JPEG
+        cmd.arg("-y");                        // Overwrite if exists
+        cmd.arg(output_path_str);
+
+        let status = cmd.output().map_err(ThumbnailError::IoError)?;
 
         if !status.status.success() {
             let stderr = String::from_utf8_lossy(&status.stderr);

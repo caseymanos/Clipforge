@@ -1,6 +1,6 @@
 // Linux screen recording implementation (stub for future development)
 
-use super::{RecordingConfig, RecordingError, RecordingSource, RecordingState, ScreenRecorder};
+use super::{RecordingConfig, RecordingError, RecordingSource, RecordingState, ScreenRecorder, SourceTypeFilter};
 use std::path::PathBuf;
 use log::warn;
 
@@ -23,7 +23,7 @@ impl LinuxRecorder {
 
 #[async_trait::async_trait]
 impl ScreenRecorder for LinuxRecorder {
-    async fn list_sources(&self) -> Result<Vec<RecordingSource>, RecordingError> {
+    async fn list_sources(&self, _filter: SourceTypeFilter) -> Result<Vec<RecordingSource>, RecordingError> {
         warn!("Linux screen recording not yet implemented");
         Err(RecordingError::PlatformNotSupported)
     }

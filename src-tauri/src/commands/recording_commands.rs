@@ -1,7 +1,7 @@
 // Tauri commands for screen recording
 
 use crate::recording::{
-    PlatformRecorder, RecordingConfig, RecordingSource, RecordingState, ScreenRecorder,
+    PlatformRecorder, RecordingConfig, RecordingSource, RecordingState, ScreenRecorder, SourceTypeFilter,
 };
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -29,17 +29,19 @@ impl RecordingService {
     }
 }
 
-/// List available recording sources (screens and windows)
+/// List available recording sources filtered by type
 #[tauri::command]
 pub async fn list_recording_sources(
     service: State<'_, RecordingService>,
+    filter: Option<SourceTypeFilter>,
 ) -> Result<Vec<RecordingSource>, String> {
-    info!("Command: list_recording_sources");
+    let filter = filter.unwrap_or(SourceTypeFilter::All);
+    info!("Command: list_recording_sources (filter: {:?})", filter);
 
     let recorder = service.get_recorder().await;
 
     recorder
-        .list_sources()
+        .list_sources(filter)
         .await
         .map_err(|e| {
             error!("Failed to list recording sources: {}", e);

@@ -30,7 +30,21 @@ pub use linux::LinuxRecorder as PlatformRecorder;
 pub use error::RecordingError;
 pub use state::RecordingState;
 
-/// Represents a recording source (screen, window, or application)
+/// Filter for listing recording sources
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceTypeFilter {
+    /// Only screen sources
+    Screen,
+    /// Only webcam sources
+    Webcam,
+    /// Only window sources
+    Window,
+    /// All source types
+    All,
+}
+
+/// Represents a recording source (screen, window, or webcam)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum RecordingSource {
@@ -51,6 +65,13 @@ pub enum RecordingSource {
         #[serde(skip_serializing_if = "Option::is_none")]
         preview_path: Option<String>,
     },
+    /// Webcam/camera device
+    Webcam {
+        id: String,
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        preview_path: Option<String>,
+    },
 }
 
 impl RecordingSource {
@@ -58,6 +79,7 @@ impl RecordingSource {
         match self {
             RecordingSource::Screen { id, .. } => id,
             RecordingSource::Window { id, .. } => id,
+            RecordingSource::Webcam { id, .. } => id,
         }
     }
 
@@ -65,6 +87,7 @@ impl RecordingSource {
         match self {
             RecordingSource::Screen { name, .. } => name,
             RecordingSource::Window { name, .. } => name,
+            RecordingSource::Webcam { name, .. } => name,
         }
     }
 }
@@ -81,6 +104,20 @@ pub enum AudioInputType {
 impl Default for AudioInputType {
     fn default() -> Self {
         Self::None
+    }
+}
+
+/// Recording mode: screen, webcam, or both simultaneously
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RecordingMode {
+    ScreenOnly,
+    WebcamOnly,
+    ScreenAndWebcam,  // Records two separate files
+}
+
+impl Default for RecordingMode {
+    fn default() -> Self {
+        Self::ScreenOnly
     }
 }
 
@@ -114,6 +151,18 @@ pub struct RecordingConfig {
     /// If None, records the entire screen
     #[serde(default)]
     pub crop_region: Option<CropRegion>,
+
+    /// Recording mode (screen, webcam, or both)
+    #[serde(default)]
+    pub recording_mode: RecordingMode,
+
+    /// Webcam source for webcam-only or dual recording
+    #[serde(default)]
+    pub webcam_source: Option<RecordingSource>,
+
+    /// Webcam output path (for dual recording mode)
+    #[serde(default)]
+    pub webcam_output_path: Option<PathBuf>,
 }
 
 /// Screen region for cropped recording
@@ -139,6 +188,9 @@ impl Default for RecordingConfig {
             audio_device_id: None,
             show_cursor: default_cursor(),
             crop_region: None,
+            recording_mode: RecordingMode::default(),
+            webcam_source: None,
+            webcam_output_path: None,
         }
     }
 }
@@ -149,8 +201,8 @@ impl Default for RecordingConfig {
 /// with platform-specific APIs.
 #[async_trait::async_trait]
 pub trait ScreenRecorder: Send + Sync {
-    /// List available recording sources (screens and windows)
-    async fn list_sources(&self) -> Result<Vec<RecordingSource>, RecordingError>;
+    /// List available recording sources filtered by type
+    async fn list_sources(&self, filter: SourceTypeFilter) -> Result<Vec<RecordingSource>, RecordingError>;
 
     /// Check if we have necessary recording permissions
     async fn check_permissions(&self) -> Result<bool, RecordingError>;
