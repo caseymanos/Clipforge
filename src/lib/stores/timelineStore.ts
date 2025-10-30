@@ -133,7 +133,7 @@ export async function addClipToTrack(trackId: string, clip: Clip): Promise<void>
     });
 
     try {
-        // Sync with backend
+        // Sync with backend (Tauri converts Rust snake_case to JS camelCase)
         await invoke('add_clip_to_timeline', { trackId, clip });
     } catch (error) {
         // Rollback on error
@@ -275,7 +275,17 @@ export async function addMediaFileToTimeline(
     const audioTrack = currentTimeline.tracks.find(t => t.track_type === 'Audio');
 
     // Calculate position (default to end of timeline)
-    const targetPosition = position ?? currentTimeline.duration;
+    // Find the actual end position by checking all clips on all tracks
+    let calculatedEndPosition = 0;
+    for (const track of currentTimeline.tracks) {
+        for (const clip of track.clips) {
+            const clipEnd = clip.track_position + clip.duration;
+            if (clipEnd > calculatedEndPosition) {
+                calculatedEndPosition = clipEnd;
+            }
+        }
+    }
+    const targetPosition = position ?? calculatedEndPosition;
 
     // Determine if this is audio-only file
     const isAudioOnly = mediaFile.media_type === 'audio' || (!mediaFile.codec.video && mediaFile.codec.audio);

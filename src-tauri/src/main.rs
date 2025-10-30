@@ -24,6 +24,7 @@ mod error_handler;
 
 // Module 3: FFmpeg Integration
 mod ffmpeg;
+mod ffmpeg_utils;
 
 // Module 4: Screen Recording
 mod recording;

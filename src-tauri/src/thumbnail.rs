@@ -2,10 +2,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
 use crate::models::ThumbnailError;
+use crate::ffmpeg_utils;
 
 /// Service for generating video thumbnails
 pub struct ThumbnailGenerator {
     cache_dir: PathBuf,
+    ffmpeg_path: PathBuf,
 }
 
 impl ThumbnailGenerator {
@@ -23,9 +25,17 @@ impl ThumbnailGenerator {
 
         std::fs::create_dir_all(&cache_dir)?;
 
-        log::info!("Thumbnail cache directory: {:?}", cache_dir);
+        // Find FFmpeg path
+        let ffmpeg_path = ffmpeg_utils::find_ffmpeg_path()
+            .map_err(|e| ThumbnailError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("FFmpeg not found: {}", e)
+            )))?;
 
-        Ok(Self { cache_dir })
+        log::info!("Thumbnail cache directory: {:?}", cache_dir);
+        log::info!("ThumbnailGenerator using FFmpeg at: {:?}", ffmpeg_path);
+
+        Ok(Self { cache_dir, ffmpeg_path })
     }
 
     /// Generate a single thumbnail at the specified timestamp
@@ -55,7 +65,7 @@ impl ThumbnailGenerator {
 
         log::debug!("Generating thumbnail for {:?} at {}s", video_path, timestamp);
 
-        let status = Command::new("ffmpeg")
+        let status = Command::new(&self.ffmpeg_path)
             .args([
                 "-ss", &timestamp.to_string(),
                 "-i", video_path_str,

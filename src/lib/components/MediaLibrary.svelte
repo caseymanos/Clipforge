@@ -78,11 +78,13 @@
     try {
       // Add file to timeline (default video track, at end)
       await addMediaFileToTimeline(file);
-      console.log('Added file to timeline:', file.filename);
-      // TODO: Show success toast notification
+      console.log('✓ Added file to timeline:', file.filename);
+      // Temporary alert until we implement toast notifications
+      alert(`✓ Added "${file.filename}" to timeline!`);
     } catch (error) {
-      console.error('Failed to add file to timeline:', error);
-      // TODO: Show error toast notification
+      console.error('✗ Failed to add file to timeline:', error);
+      // Show error details to user
+      alert(`✗ Failed to add file to timeline:\n${error}`);
     }
   }
 
@@ -210,9 +212,11 @@
               {file.filename}
             </div>
             <div class="metadata">
-              <span class="resolution">
-                {file.resolution.width}x{file.resolution.height}
-              </span>
+              {#if file.resolution}
+                <span class="resolution">
+                  {file.resolution.width}x{file.resolution.height}
+                </span>
+              {/if}
               <span class="codec">
                 {file.codec.video}
               </span>
