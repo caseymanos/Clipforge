@@ -24,6 +24,7 @@ mod error_handler;
 
 // Module 3: FFmpeg Integration
 mod ffmpeg;
+mod ffmpeg_utils;
 
 // Module 4: Screen Recording
 mod recording;
@@ -39,6 +40,10 @@ mod export_commands;
 // Module 8: Video Preview
 mod preview_cache;
 mod preview_service;
+
+// AI Subtitle Generation
+mod subtitle;
+mod subtitle_commands;
 
 use database::Database;
 use thumbnail::ThumbnailGenerator;
@@ -109,12 +114,18 @@ fn main() {
             // Module 8: Initialize Preview service
             let preview_service = Arc::new(Mutex::new(PreviewService::new()));
 
+            // AI Subtitle Generation: Initialize subtitle service state (API key set later)
+            let subtitle_state = subtitle_commands::SubtitleServiceState {
+                service: Arc::new(Mutex::new(None)),
+            };
+
             app.manage(file_service);
             app.manage(ffmpeg_service);
             app.manage(recording_service);
             app.manage(timeline_state);
             app.manage(export_state);
             app.manage(preview_service);
+            app.manage(subtitle_state);
 
             log::info!("ClipForge initialized successfully");
 
@@ -172,6 +183,14 @@ fn main() {
             commands::render_preview_frame,
             commands::clear_preview_cache,
             commands::get_cache_stats,
+            // AI Subtitle commands
+            subtitle_commands::set_openai_api_key,
+            subtitle_commands::check_subtitle_available,
+            subtitle_commands::transcribe_timeline_audio,
+            subtitle_commands::update_subtitle_segment,
+            subtitle_commands::toggle_subtitles,
+            subtitle_commands::export_subtitles_srt,
+            subtitle_commands::import_subtitles_srt,
         ])
         // Handle window events
         .on_window_event(|window, event| if let tauri::WindowEvent::CloseRequested { .. } = event {

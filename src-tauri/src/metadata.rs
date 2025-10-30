@@ -2,9 +2,19 @@ use std::path::Path;
 use std::process::Command;
 use serde_json::Value;
 use crate::models::{FileMetadata, MediaType, Resolution, MediaCodec, MetadataError};
+use crate::ffmpeg_utils;
 
 /// Extract video metadata using FFprobe
 pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError> {
+    // Find bundled FFprobe binary
+    let ffprobe_path = ffmpeg_utils::find_ffprobe_path()
+        .map_err(|e| MetadataError::IoError(
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("FFprobe not found: {}", e)
+            )
+        ))?;
+
     let path_str = path.to_str()
         .ok_or_else(|| MetadataError::IoError(
             std::io::Error::new(
@@ -13,7 +23,7 @@ pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError
             )
         ))?;
 
-    let output = Command::new("ffprobe")
+    let output = Command::new(&ffprobe_path)
         .args([
             "-v", "quiet",
             "-print_format", "json",

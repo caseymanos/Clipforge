@@ -131,6 +131,10 @@ pub struct Timeline {
     pub resolution: Resolution,
     pub tracks: Vec<Track>,
     pub duration: f64,  // Total duration in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtitle_track: Option<SubtitleTrack>,  // AI-generated or imported subtitles
+    #[serde(default)]
+    pub subtitle_enabled: bool,  // Global toggle for preview and export
 }
 
 /// A track in the timeline (Video, Audio, or Overlay)
@@ -328,4 +332,64 @@ pub enum ExportError {
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+}
+
+// ============================================================================
+// AI Subtitle Generation Data Structures
+// ============================================================================
+
+/// A single subtitle segment with timing and text
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubtitleSegment {
+    pub id: usize,
+    pub start_time: f64,      // seconds from timeline start
+    pub end_time: f64,        // seconds from timeline start
+    pub text: String,
+}
+
+/// Source of subtitle generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SubtitleSource {
+    Transcribed {
+        media_file_id: String,
+        provider: String,  // "openai-whisper"
+    },
+    Imported {
+        file_path: PathBuf
+    },
+    Manual,
+}
+
+/// Subtitle track for a timeline
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubtitleTrack {
+    pub segments: Vec<SubtitleSegment>,
+    pub language: String,      // ISO 639-1 code (e.g., "en", "es")
+    pub source: SubtitleSource,
+}
+
+/// Custom error types for subtitle operations
+#[derive(Debug, thiserror::Error)]
+pub enum SubtitleError {
+    #[error("API error: {0}")]
+    ApiError(String),
+
+    #[error("No audio track found in media file")]
+    NoAudioTrack,
+
+    #[error("Invalid SRT format: {0}")]
+    InvalidSRT(String),
+
+    #[error("Transcription cache error: {0}")]
+    CacheError(String),
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("HTTP request error: {0}")]
+    RequestError(#[from] reqwest::Error),
+
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
 }

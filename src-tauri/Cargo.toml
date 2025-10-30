@@ -50,6 +50,9 @@ libc = "0.2"
 lru = "0.12"
 base64 = "0.22"
 
+# AI Subtitle Generation
+reqwest = { version = "0.11", features = ["json", "multipart", "rustls-tls"] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

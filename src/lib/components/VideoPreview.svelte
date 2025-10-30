@@ -3,6 +3,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { timelineStore, playheadTime } from '../stores/timelineStore';
   import { mediaLibraryStore } from '../stores/mediaLibraryStore';
+  import { currentSubtitle, subtitleStore } from '../stores/subtitleStore';
   import { convertFileSrc } from '@tauri-apps/api/core';
 
   // Props
@@ -1132,6 +1133,13 @@
       />
     {/if}
 
+    <!-- Subtitle Overlay -->
+    {#if $subtitleStore.enabled && $currentSubtitle}
+      <div class="subtitle-overlay">
+        {$currentSubtitle.text}
+      </div>
+    {/if}
+
     <!-- Preview state indicators -->
     {#if hasVideo || hasAudio}
       <div class="preview-indicators">
@@ -1221,6 +1229,26 @@
     z-index: 100;
     pointer-events: none;
     backdrop-filter: blur(4px);
+  }
+
+  .subtitle-overlay {
+    position: absolute;
+    bottom: 10%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 1.25rem;
+    font-weight: 500;
+    text-align: center;
+    max-width: 80%;
+    line-height: 1.5;
+    z-index: 100;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
 
   video {

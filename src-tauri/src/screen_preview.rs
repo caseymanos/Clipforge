@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use crate::models::ThumbnailError;
+use crate::ffmpeg_utils;
 
 /// Service for generating screen preview thumbnails
 pub struct ScreenPreviewGenerator {
     cache_dir: PathBuf,
+    ffmpeg_path: PathBuf,
 }
 
 impl ScreenPreviewGenerator {
@@ -22,9 +24,17 @@ impl ScreenPreviewGenerator {
 
         std::fs::create_dir_all(&cache_dir)?;
 
-        log::info!("Screen preview cache directory: {:?}", cache_dir);
+        // Find FFmpeg path
+        let ffmpeg_path = ffmpeg_utils::find_ffmpeg_path()
+            .map_err(|e| ThumbnailError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("FFmpeg not found: {}", e)
+            )))?;
 
-        Ok(Self { cache_dir })
+        log::info!("Screen preview cache directory: {:?}", cache_dir);
+        log::info!("ScreenPreviewGenerator using FFmpeg at: {:?}", ffmpeg_path);
+
+        Ok(Self { cache_dir, ffmpeg_path })
     }
 
     /// Generate a screen preview thumbnail for a given device ID
@@ -57,9 +67,10 @@ impl ScreenPreviewGenerator {
         // -y: Overwrite if exists
         let input_device = format!("{}:none", device_id);
 
-        let status = Command::new("ffmpeg")
+        let status = Command::new(&self.ffmpeg_path)
             .args([
                 "-f", "avfoundation",
+                "-t", "0.1",             // 100ms timeout to prevent hanging
                 "-i", &input_device,
                 "-vframes", "1",
                 "-vf", "scale=320:-1",  // Width 320px, height auto

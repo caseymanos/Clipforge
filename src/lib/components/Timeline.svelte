@@ -203,16 +203,14 @@
     });
 
     clipRect.on('dragmove', (e) => {
-      const target = e.target;
-      const newX = target.x();
-      const newTime = (newX + currentScrollOffset) / currentPixelsPerSecond;
+      // Allow free movement during drag for smooth UX
+      // Constraints will be applied on dragend when the clip is released
 
-      // Constrain to timeline bounds
-      const constrainedTime = Math.max(0, newTime);
-      target.x((constrainedTime * currentPixelsPerSecond) - currentScrollOffset);
-
-      // Snap to grid (optional)
-      // const snappedTime = Math.round(constrainedTime * 4) / 4; // Snap to 0.25s
+      // Optional: Add visual feedback during drag (e.g., snap guides)
+      // const target = e.target;
+      // const newX = target.x();
+      // const newTime = (newX + currentScrollOffset) / currentPixelsPerSecond;
+      // const snappedTime = Math.round(newTime * 4) / 4; // Snap to 0.25s grid
     });
 
     clipRect.on('dragend', (e) => {
