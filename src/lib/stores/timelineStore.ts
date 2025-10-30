@@ -251,6 +251,77 @@ export async function updateClipDuration(clipId: string, newDuration: number, tr
     }
 }
 
+/**
+ * Split a clip at the playhead position
+ * Returns the IDs of both new clips, or throws an error if the operation fails
+ */
+export async function splitClipAtPlayhead(): Promise<{ firstClipId: string; secondClipId: string }> {
+    // Get current state
+    let currentClipId: string | null = null;
+    let currentPlayhead: number = 0;
+    let clip: Clip | null = null;
+    let trackId: string | null = null;
+
+    selectedClipId.subscribe(id => currentClipId = id)();
+    playheadTime.subscribe(time => currentPlayhead = time)();
+
+    // Validation: Check if a clip is selected
+    if (!currentClipId) {
+        throw new Error('No clip selected. Please select a clip to split.');
+    }
+
+    // Find the selected clip and its track
+    const currentTimeline = await getTimelineState();
+    for (const track of currentTimeline.tracks) {
+        const foundClip = track.clips.find(c => c.id === currentClipId);
+        if (foundClip) {
+            clip = foundClip;
+            trackId = track.id;
+            break;
+        }
+    }
+
+    if (!clip || !trackId) {
+        throw new Error('Selected clip not found in timeline.');
+    }
+
+    // Validation: Check if playhead is within clip bounds
+    const clipStart = clip.track_position;
+    const clipEnd = clip.track_position + clip.duration;
+
+    if (currentPlayhead <= clipStart || currentPlayhead >= clipEnd) {
+        throw new Error(`Playhead must be within the clip bounds (${clipStart.toFixed(2)}s - ${clipEnd.toFixed(2)}s). Current position: ${currentPlayhead.toFixed(2)}s`);
+    }
+
+    // Calculate split time relative to clip start
+    const splitTime = currentPlayhead - clipStart;
+
+    // Optimistic UI update
+    const previousState = await getTimelineState();
+
+    try {
+        // Call backend to split clip
+        const [firstClipId, secondClipId] = await invoke<[string, string]>('split_clip_at_time', {
+            clipId: currentClipId,
+            splitTime
+        });
+
+        // Update frontend timeline state
+        await initializeTimeline(); // Refresh from backend to get accurate state
+
+        // Select both new clips
+        selectedClipId.set(firstClipId); // Primary selection is first clip
+        // Note: Multi-selection would require a separate store. For now, we just select the first clip.
+        // TODO: Implement multi-selection store to select both clips
+
+        return { firstClipId, secondClipId };
+    } catch (error) {
+        console.error('Failed to split clip in backend:', error);
+        timelineStore.set(previousState);
+        throw error;
+    }
+}
+
 export function setPlayheadTime(time: number) {
     playheadTime.set(Math.max(0, time));
 }

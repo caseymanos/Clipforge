@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import Konva from 'konva';
   import ConfirmDialog from './ConfirmDialog.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   import {
     timelineStore,
     playheadTime,
@@ -13,6 +14,7 @@
     updateClipDuration,
     addMediaFileToTimeline,
     removeClip,
+    splitClipAtPlayhead,
     type Timeline,
     type Track,
     type Clip
@@ -52,6 +54,12 @@
   let confirmDialogX = 0;
   let confirmDialogY = 0;
   let pendingDeleteClipId: string | null = null;
+
+  // Context menu state
+  let showContextMenu = false;
+  let contextMenuX = 0;
+  let contextMenuY = 0;
+  let contextMenuClipId: string | null = null;
 
   // Subscribe to stores
   const unsubTimeline = timelineStore.subscribe(value => { currentTimeline = value; renderTimeline(); });
@@ -249,17 +257,14 @@
       e.evt.preventDefault();
       selectClip(clip.id);
 
-      // Show custom confirm dialog near cursor (convert to screen coordinates)
+      // Show context menu near cursor (convert to screen coordinates)
       const stageBox = container.getBoundingClientRect();
       const mousePos = stage.getPointerPosition();
       if (mousePos) {
-        const clipName = clip.name || `Clip ${clip.id.substring(0, 8)}`;
-        confirmMessage = `Delete "${clipName}"?`;
-        // Convert Konva canvas coordinates to screen coordinates
-        confirmDialogX = stageBox.left + mousePos.x;
-        confirmDialogY = stageBox.top + mousePos.y;
-        pendingDeleteClipId = clip.id;
-        showConfirmDialog = true;
+        contextMenuX = stageBox.left + mousePos.x;
+        contextMenuY = stageBox.top + mousePos.y;
+        contextMenuClipId = clip.id;
+        showContextMenu = true;
       }
     });
 
@@ -481,6 +486,42 @@
     showConfirmDialog = false;
   }
 
+  // Handle context menu selection
+  async function handleContextMenuSelect(event: CustomEvent) {
+    const action = event.detail.action;
+    showContextMenu = false;
+
+    if (!contextMenuClipId) return;
+
+    if (action === 'split') {
+      try {
+        await splitClipAtPlayhead();
+        console.log('Clip split successfully from context menu');
+      } catch (error) {
+        console.error('Failed to split clip:', error);
+        alert(error instanceof Error ? error.message : 'Failed to split clip');
+      }
+    } else if (action === 'delete') {
+      // Find the clip name
+      let clipName = '';
+      for (const track of currentTimeline.tracks) {
+        const clip = track.clips.find(c => c.id === contextMenuClipId);
+        if (clip) {
+          clipName = clip.name || `Clip ${clip.id.substring(0, 8)}`;
+          break;
+        }
+      }
+      // Show confirmation dialog
+      confirmMessage = `Delete "${clipName}"?`;
+      confirmDialogX = window.innerWidth / 2;
+      confirmDialogY = window.innerHeight / 2;
+      pendingDeleteClipId = contextMenuClipId;
+      showConfirmDialog = true;
+    }
+
+    contextMenuClipId = null;
+  }
+
   // Drag-and-drop handlers for adding media to timeline
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
@@ -525,7 +566,20 @@
     }
   }
 
-  function handleKeyDown(e: KeyboardEvent) {
+  async function handleKeyDown(e: KeyboardEvent) {
+    // Split clip at playhead with Cmd/Ctrl+B
+    if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+      e.preventDefault();
+      try {
+        await splitClipAtPlayhead();
+        console.log('Clip split successfully at playhead position');
+      } catch (error) {
+        console.error('Failed to split clip:', error);
+        alert(error instanceof Error ? error.message : 'Failed to split clip');
+      }
+      return;
+    }
+
     // Delete selected clip with Delete or Backspace key
     if ((e.key === 'Delete' || e.key === 'Backspace') && currentSelectedClipId) {
       e.preventDefault();
@@ -583,6 +637,17 @@
   x={confirmDialogX}
   y={confirmDialogY}
   on:confirm={handleConfirmResponse}
+/>
+
+<ContextMenu
+  bind:show={showContextMenu}
+  x={contextMenuX}
+  y={contextMenuY}
+  options={[
+    { label: 'Split Clip', action: 'split' },
+    { label: 'Delete', action: 'delete' }
+  ]}
+  on:select={handleContextMenuSelect}
 />
 
 <style>
