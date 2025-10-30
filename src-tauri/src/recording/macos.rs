@@ -1,6 +1,7 @@
 // macOS screen recording implementation using FFmpeg with screen capture
 
 use super::{AudioInputType, RecordingConfig, RecordingError, RecordingSource, RecordingState, ScreenRecorder};
+use crate::ffmpeg_utils;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,7 @@ use log::{info, warn, error};
 /// better cross-platform consistency.
 pub struct MacOSRecorder {
     state: Arc<Mutex<RecorderState>>,
+    ffmpeg_path: PathBuf,
 }
 
 struct RecorderState {
@@ -25,6 +27,15 @@ struct RecorderState {
 
 impl MacOSRecorder {
     pub fn new() -> Self {
+        // Find FFmpeg path during initialization
+        let ffmpeg_path = ffmpeg_utils::find_ffmpeg_path()
+            .unwrap_or_else(|e| {
+                warn!("Failed to find FFmpeg: {}. Recording features will be unavailable.", e);
+                PathBuf::from("ffmpeg") // Fallback to PATH lookup
+            });
+
+        info!("MacOSRecorder initialized with FFmpeg at: {:?}", ffmpeg_path);
+
         Self {
             state: Arc::new(Mutex::new(RecorderState {
                 state: RecordingState::Idle,
@@ -32,92 +43,69 @@ impl MacOSRecorder {
                 output_path: None,
                 start_time: None,
             })),
+            ffmpeg_path,
         }
     }
 
-    /// Get available screen capture devices using FFmpeg
-    fn get_screen_devices() -> Result<Vec<(String, String)>, RecordingError> {
-        // On macOS, FFmpeg can capture screens using:
-        // - "Capture screen 0" (main display)
-        // - "Capture screen 1" (secondary display, if available)
-
-        // For simplicity, we'll enumerate common screen indices
-        // In a production app, we'd query the system for actual screens
-
-        let output = Command::new("ffmpeg")
-            .args(&["-f", "avfoundation", "-list_devices", "true", "-i", ""])
-            .output()
-            .map_err(|e| RecordingError::SystemError(format!("Failed to run ffmpeg: {}", e)))?;
-
-        // FFmpeg outputs device list to stderr
-        let stderr = String::from_utf8_lossy(&output.stderr);
-
-        let mut devices = Vec::new();
-
-        // Parse FFmpeg output for AVFoundation devices
-        // Example: "[AVFoundation indev @ 0x...] [0] FaceTime HD Camera"
-        // Example: "[AVFoundation indev @ 0x...] [1] Capture screen 0"
-
-        for line in stderr.lines() {
-            if line.contains("Capture screen") {
-                if let Some(device_id) = extract_device_id(line) {
-                    if let Some(device_name) = extract_device_name(line) {
-                        devices.push((device_id, device_name));
-                    }
-                }
-            }
+    /// Get available screen capture devices
+    ///
+    /// Uses Core Graphics to enumerate actual connected displays.
+    /// The FFmpeg device IDs for AVFoundation screens start after video input devices,
+    /// typically at index 5 or higher. We map CG display IDs to FFmpeg device indices.
+    fn get_screen_devices(_ffmpeg_path: &PathBuf) -> Result<Vec<(String, String)>, RecordingError> {
+        // Core Graphics display enumeration using raw FFI
+        // This is a minimal implementation to avoid adding external dependencies
+        extern "C" {
+            fn CGGetActiveDisplayList(
+                max_displays: u32,
+                active_displays: *mut u32,
+                display_count: *mut u32,
+            ) -> i32;
         }
 
-        // If we couldn't parse devices, add default screens
+        let mut displays = [0u32; 10];  // Support up to 10 displays
+        let mut display_count: u32 = 0;
+
+        // Call Core Graphics to get active displays
+        let result = unsafe {
+            CGGetActiveDisplayList(10, displays.as_mut_ptr(), &mut display_count)
+        };
+
+        if result != 0 {
+            error!("Failed to enumerate displays via Core Graphics: error code {}", result);
+            // Fallback: assume at least one screen
+            return Ok(vec![("0".to_string(), "Capture screen 0".to_string())]);
+        }
+
+        info!("Core Graphics found {} active display(s)", display_count);
+
+        // FFmpeg AVFoundation device IDs for screens typically start at index 5
+        // (after cameras/video devices). We create a sequential mapping.
+        let mut devices = Vec::new();
+        for i in 0..display_count {
+            let screen_index = i;
+            let device_name = format!("Capture screen {}", screen_index);
+            // FFmpeg device ID is the screen index (0, 1, 2, etc.)
+            devices.push((screen_index.to_string(), device_name));
+            info!("Screen {}: {} (FFmpeg device ID: {})", i, devices[i as usize].1, screen_index);
+        }
+
         if devices.is_empty() {
-            info!("Could not parse FFmpeg devices, using defaults");
-            devices.push(("5".to_string(), "Capture screen 0".to_string()));
+            warn!("No displays detected, adding default screen");
+            devices.push(("0".to_string(), "Capture screen 0".to_string()));
         }
 
         Ok(devices)
     }
 }
 
-/// Extract device ID from FFmpeg device list line
-fn extract_device_id(line: &str) -> Option<String> {
-    // Format: "[AVFoundation indev @ 0x...] [5] Capture screen 0"
-    // We need to find the SECOND bracket pair, which contains the device ID
-
-    // Find first closing bracket
-    if let Some(first_close) = line.find(']') {
-        // Search for second opening bracket after the first closing bracket
-        let remaining = &line[first_close + 1..];
-        if let Some(start) = remaining.find('[') {
-            if let Some(end) = remaining[start + 1..].find(']') {
-                let id_str = &remaining[start + 1..start + 1 + end];
-                // Check if it's a number
-                if id_str.chars().all(|c| c.is_numeric()) {
-                    return Some(id_str.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Extract device name from FFmpeg device list line
-fn extract_device_name(line: &str) -> Option<String> {
-    // Get text after the last ']'
-    if let Some(pos) = line.rfind(']') {
-        let name = line[pos + 1..].trim();
-        if !name.is_empty() {
-            return Some(name.to_string());
-        }
-    }
-    None
-}
 
 #[async_trait::async_trait]
 impl ScreenRecorder for MacOSRecorder {
     async fn list_sources(&self) -> Result<Vec<RecordingSource>, RecordingError> {
         info!("Listing macOS recording sources");
 
-        let devices = Self::get_screen_devices()?;
+        let devices = Self::get_screen_devices(&self.ffmpeg_path)?;
 
         // Initialize preview generator
         let preview_generator = match crate::screen_preview::ScreenPreviewGenerator::new() {
@@ -181,7 +169,7 @@ impl ScreenRecorder for MacOSRecorder {
         info!("Checking screen recording permissions");
 
         // Try to list devices - if this fails, we likely don't have permission
-        match Self::get_screen_devices() {
+        match Self::get_screen_devices(&self.ffmpeg_path) {
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }
@@ -227,7 +215,7 @@ impl ScreenRecorder for MacOSRecorder {
         // Build FFmpeg command for screen capture
         // Format: ffmpeg -f avfoundation -capture_cursor 1 -framerate 30 -i "1" output.mp4
 
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = Command::new(&self.ffmpeg_path);
 
         // Input format (AVFoundation)
         cmd.arg("-f").arg("avfoundation");
@@ -240,27 +228,29 @@ impl ScreenRecorder for MacOSRecorder {
         // Frame rate
         cmd.arg("-framerate").arg(config.fps.to_string());
 
-        // Input device (screen index)
-        // Format: "video_device_index:audio_device_index" or just "video_index"
-        // On macOS with AVFoundation:
-        // - "1:none" = screen only (no audio)
-        // - "1:0" = screen + first audio input device (usually microphone)
-        // - ":0" = audio only (for system audio, we'd need additional setup)
+        // Input device (screen capture by name)
+        // On macOS with AVFoundation, screens are accessed by name, not numeric index:
+        // - "Capture screen 0" = first screen
+        // - "Capture screen 1" = second screen, etc.
+        // Format: "video_device_name:audio_device_index" or "video_device_name:none"
+        //
+        // IMPORTANT: Numeric indices 0-4 are camera devices! We must use the name format.
+        let screen_name = format!("Capture screen {}", source.id());
         let device_input = match config.audio_input {
             AudioInputType::None => {
-                format!("{}:none", source.id()) // Video only
+                format!("{}:none", screen_name) // Screen capture only (no audio)
             }
             AudioInputType::Microphone => {
                 // Use audio device ID if provided, otherwise default to 0 (first audio input)
                 let audio_id = config.audio_device_id.as_deref().unwrap_or("0");
-                format!("{}:{}", source.id(), audio_id) // Video + microphone
+                format!("{}:{}", screen_name, audio_id) // Screen + microphone
             }
             AudioInputType::SystemAudio => {
                 // System audio on macOS requires additional setup (e.g., BlackHole)
                 // For now, we'll use the first audio device as a fallback
                 // TODO: Implement proper system audio capture with virtual audio devices
                 warn!("System audio capture requires additional setup on macOS (e.g., BlackHole virtual audio device)");
-                format!("{}:0", source.id()) // Video + first audio device
+                format!("{}:0", screen_name) // Screen + first audio device
             }
             AudioInputType::Both => {
                 // Recording both system audio and microphone requires audio mixing
@@ -268,7 +258,7 @@ impl ScreenRecorder for MacOSRecorder {
                 // For now, we'll just capture microphone
                 // TODO: Implement audio mixing for system + microphone
                 warn!("Recording both system and microphone audio requires audio mixing setup");
-                format!("{}:0", source.id()) // Video + microphone (fallback)
+                format!("{}:0", screen_name) // Screen + microphone (fallback)
             }
         };
         cmd.arg("-i").arg(device_input);
@@ -340,6 +330,11 @@ impl ScreenRecorder for MacOSRecorder {
             RecordingError::RecordingFailed("No output path found".to_string())
         })?;
 
+        // Set state to Idle immediately after taking the process
+        // This allows new recordings to start while we finalize the current one
+        state.state = RecordingState::Idle;
+        state.start_time = None;
+
         // Send SIGINT to FFmpeg for graceful shutdown FIRST
         // This allows FFmpeg to finalize the video file properly
         let pid = process.id();
@@ -386,12 +381,52 @@ impl ScreenRecorder for MacOSRecorder {
             }
         }
 
-        // Update state
-        let mut state = self.state.lock().unwrap();
-        state.state = RecordingState::Idle;
-        state.start_time = None;
+        // State was already set to Idle earlier, no need to update again
 
-        info!("Recording saved to: {}", output_path.display());
+        // Verify the output file was actually created by FFmpeg
+        // FFmpeg needs time to finalize the MP4 moov atom after receiving SIGINT
+        // Retry up to 5 times with 100ms delays (total 500ms max wait)
+        let mut file_exists = false;
+        for attempt in 0..5 {
+            if output_path.exists() {
+                file_exists = true;
+                break;
+            }
+            if attempt < 4 {
+                info!("Output file not found yet, waiting 100ms (attempt {}/5)", attempt + 1);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+
+        if !file_exists {
+            error!("Recording file was not created by FFmpeg after 500ms: {}", output_path.display());
+            error!("FFmpeg may have failed silently. Check stderr output above.");
+            return Err(RecordingError::RecordingFailed(format!(
+                "Recording file not created: {}. FFmpeg may have failed during finalization.",
+                output_path.display()
+            )));
+        }
+
+        // Verify file has non-zero size
+        match std::fs::metadata(&output_path) {
+            Ok(metadata) => {
+                let file_size = metadata.len();
+                if file_size == 0 {
+                    error!("Recording file is empty (0 bytes): {}", output_path.display());
+                    return Err(RecordingError::RecordingFailed(format!(
+                        "Recording file is empty. Recording may have been too short or FFmpeg failed."
+                    )));
+                }
+                info!("Recording saved successfully: {} ({} bytes)", output_path.display(), file_size);
+            }
+            Err(e) => {
+                error!("Cannot read recording file metadata: {}", e);
+                return Err(RecordingError::RecordingFailed(format!(
+                    "Cannot verify recording file: {}", e
+                )));
+            }
+        }
+
         Ok(output_path)
     }
 
