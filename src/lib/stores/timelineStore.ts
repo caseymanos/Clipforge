@@ -1,5 +1,6 @@
 import { writable, derived } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import type { SubtitleTrack } from './subtitleStore';
 
 // Types matching backend data structures
 export interface Timeline {
@@ -12,6 +13,8 @@ export interface Timeline {
     };
     tracks: Track[];
     duration: number;
+    subtitle_track?: SubtitleTrack | null;
+    subtitle_enabled?: boolean;
 }
 
 export interface Track {

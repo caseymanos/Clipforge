@@ -382,13 +382,13 @@ impl ExportService {
         // Concatenate all video inputs
         if !video_inputs.is_empty() {
             let video_label = if timeline.subtitle_enabled && timeline.subtitle_track.is_some() {
-                "[vconcat]" // Intermediate label for subtitle burning
+                "vconcat" // Intermediate label for subtitle burning
             } else {
-                "[outv]" // Final output if no subtitles
+                "outv" // Final output if no subtitles
             };
 
             let concat_filter = format!(
-                "{}concat=n={}:v=1:a=0{}",
+                "{}concat=n={}:v=1:a=0[{}]",
                 video_inputs.iter().map(|l| format!("[{}]", l)).collect::<Vec<_>>().join(""),
                 video_inputs.len(),
                 video_label
@@ -412,19 +412,23 @@ impl ExportService {
                     std::fs::write(&temp_srt, srt_content)
                         .map_err(|e| ExportError::OutputError(format!("Failed to write SRT: {}", e)))?;
 
-                    // Add subtitles filter
+                    // Add subtitles filter using configurable style
+                    let style = &subtitle_track.style;
                     let subtitle_filter = format!(
-                        "[vconcat]subtitles={}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=1,MarginV=20'[outv]",
-                        temp_srt.to_string_lossy().replace("\\", "\\\\").replace(":", "\\:")
+                        "[vconcat]subtitles={}:force_style='FontName={},FontSize={},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=1,MarginV={}'[outv]",
+                        temp_srt.to_string_lossy().replace("\\", "\\\\").replace(":", "\\:"),
+                        style.font_name,
+                        style.font_size,
+                        style.margin_v
                     );
                     filters.push(subtitle_filter);
 
-                    info!("Added subtitle burning filter with {} segments", subtitle_track.segments.len());
+                    info!("Added subtitle burning filter with {} segments ({}px font)", subtitle_track.segments.len(), style.font_size);
                 }
             }
         }
 
-        // Concatenate all audio inputs
+        // Concatenate all audio inputs or create silent audio
         if !audio_inputs.is_empty() {
             let concat_filter = format!(
                 "{}concat=n={}:v=0:a=1[outa]",
@@ -432,6 +436,13 @@ impl ExportService {
                 audio_inputs.len()
             );
             filters.push(concat_filter);
+        } else {
+            // Generate silent audio if no audio inputs
+            filters.push(format!(
+                "anullsrc=channel_layout=stereo:sample_rate=48000:duration={}[outa]",
+                timeline.duration
+            ));
+            info!("No audio tracks found, generating silent audio");
         }
 
         Ok(filters.join(";"))

@@ -18,10 +18,17 @@ export interface SubtitleSource {
     file_path?: string;
 }
 
+export interface SubtitleStyle {
+    font_size: number;
+    font_name: string;
+    margin_v: number;
+}
+
 export interface SubtitleTrack {
     segments: SubtitleSegment[];
     language: string;
     source: SubtitleSource;
+    style: SubtitleStyle;
 }
 
 export interface SubtitleProgress {
@@ -344,6 +351,26 @@ export function setEditingSegment(segmentId: number | null): void {
         ...state,
         editingSegmentId: segmentId,
     }));
+}
+
+/**
+ * Update subtitle style
+ */
+export function updateSubtitleStyle(style: Partial<SubtitleStyle>): void {
+    subtitleStore.update(state => {
+        if (!state.currentTrack) return state;
+
+        return {
+            ...state,
+            currentTrack: {
+                ...state.currentTrack,
+                style: {
+                    ...state.currentTrack.style,
+                    ...style,
+                },
+            },
+        };
+    });
 }
 
 /**
