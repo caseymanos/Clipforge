@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Sha256, Digest};
 use std::path::{Path, PathBuf};
 use std::fs;
+use std::io::{BufReader, Read};
 use tauri::{Window, Emitter};
 
 /// OpenAI Whisper API response format
@@ -131,6 +132,7 @@ impl SubtitleService {
                 media_file_id: media_file.id.clone(),
                 provider: "openai-whisper".to_string(),
             },
+            style: Default::default(),
         };
 
         // Cache the result
@@ -171,8 +173,15 @@ impl SubtitleService {
             .map_err(|e| SubtitleError::IoError(e))?;
 
         if !output.status.success() {
-            error!("FFmpeg audio extraction failed: {}", String::from_utf8_lossy(&output.stderr));
-            return Err(SubtitleError::NoAudioTrack);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let error_msg = format!(
+                "FFmpeg failed to extract audio from {:?}. Exit code: {:?}. stderr: {}",
+                video_path,
+                output.status.code(),
+                stderr
+            );
+            error!("{}", error_msg);
+            return Err(SubtitleError::CacheError(error_msg));
         }
 
         Ok(audio_path)
@@ -223,11 +232,12 @@ impl SubtitleService {
 
         let verbose_response: WhisperVerboseResponse = response.json().await?;
 
-        // Convert to SubtitleSegment format
+        // Convert to SubtitleSegment format with sequential 1-based IDs
         let segments = verbose_response.segments
             .into_iter()
-            .map(|seg| SubtitleSegment {
-                id: seg.id,
+            .enumerate()
+            .map(|(idx, seg)| SubtitleSegment {
+                id: idx + 1,  // Force sequential 1-based numbering
                 start_time: seg.start,
                 end_time: seg.end,
                 text: seg.text.trim().to_string(),
@@ -237,11 +247,21 @@ impl SubtitleService {
         Ok(segments)
     }
 
-    /// Compute SHA256 hash of file for caching
+    /// Compute SHA256 hash of file for caching (streaming to avoid memory exhaustion)
     fn compute_file_hash(&self, path: &Path) -> Result<String, SubtitleError> {
-        let bytes = fs::read(path)?;
+        let file = fs::File::open(path)?;
+        let mut reader = BufReader::with_capacity(8192, file); // 8KB buffer
         let mut hasher = Sha256::new();
-        hasher.update(&bytes);
+        let mut buffer = [0u8; 8192];
+
+        loop {
+            let bytes_read = reader.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+        }
+
         Ok(format!("{:x}", hasher.finalize()))
     }
 
@@ -279,10 +299,11 @@ impl SubtitleService {
         Ok(())
     }
 
-    /// Parse SRT format string into subtitle segments
+    /// Parse SRT format string into subtitle segments with validation
     pub fn parse_srt(srt_content: &str) -> Result<Vec<SubtitleSegment>, SubtitleError> {
         let mut segments = Vec::new();
         let blocks: Vec<&str> = srt_content.split("\n\n").collect();
+        let mut last_end_time = 0.0;
 
         for block in blocks {
             let lines: Vec<&str> = block.lines().collect();
@@ -303,8 +324,27 @@ impl SubtitleService {
             let start_time = Self::parse_srt_timestamp(times[0].trim())?;
             let end_time = Self::parse_srt_timestamp(times[1].trim())?;
 
+            // Validate timestamp ordering within segment
+            if start_time >= end_time {
+                return Err(SubtitleError::InvalidSRT(
+                    format!("Segment {}: start time ({}) must be before end time ({})", id, start_time, end_time)
+                ));
+            }
+
+            // Validate timestamp ordering across segments
+            if start_time < last_end_time {
+                warn!("Segment {}: start time ({}) is before previous segment's end time ({})",
+                      id, start_time, last_end_time);
+            }
+            last_end_time = end_time;
+
             // Parse text (may span multiple lines)
             let text = lines[2..].join("\n");
+
+            // Validate non-empty text
+            if text.trim().is_empty() {
+                warn!("Segment {}: text is empty", id);
+            }
 
             segments.push(SubtitleSegment {
                 id,
