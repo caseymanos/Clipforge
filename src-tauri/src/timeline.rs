@@ -85,6 +85,8 @@ impl TimelineService {
                 },
             ],
             duration: 0.0,
+            subtitle_track: None,
+            subtitle_enabled: false,
         };
 
         self.current_timeline = Some(timeline.clone());
