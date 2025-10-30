@@ -21,8 +21,15 @@
     initializeRecordingListeners,
     cleanupRecordingListeners,
     formatRecordingDuration,
+    recordingMode,
+    selectedWebcam,
+    isDualMode,
+    isWebcamMode,
+    webcamSources,
+    screenSources,
     type AudioInputType,
     type CropRegion,
+    type RecordingMode,
   } from '../stores/recordingStore';
   import { importMediaFile } from '../stores/mediaLibraryStore';
   import CropEditor from './CropEditor.svelte';
@@ -71,7 +78,8 @@
       if (!hasPerms) {
         showPermissionDialog = true;
       } else {
-        await loadRecordingSources();
+        // Load all sources initially
+        await loadRecordingSources('all');
       }
     }
   }
@@ -80,11 +88,20 @@
     const granted = await requestRecordingPermissions();
     if (granted) {
       showPermissionDialog = false;
-      await loadRecordingSources();
+      await loadRecordingSources('all');
     } else {
       // Show platform-specific instructions
       alert('Please grant screen recording permission in System Preferences > Privacy & Security > Screen Recording');
     }
+  }
+
+  // Reload sources when recording mode changes to get fresh preview thumbnails
+  // This prevents FFmpeg errors from trying to capture previews for the wrong device type
+  $: if (showPanel && permissionCheckDone && $hasPermissions && $recordingMode) {
+    const loadFilter = $recordingMode === 'ScreenOnly' ? 'screen'
+                     : $recordingMode === 'WebcamOnly' ? 'webcam'
+                     : 'all'; // ScreenAndWebcam needs both
+    loadRecordingSources(loadFilter);
   }
 
   function handleOpenCropEditor() {
@@ -215,6 +232,78 @@
                 {/each}
               </div>
             </div>
+
+            <!-- Recording Mode Selection -->
+            <div class="section">
+              <label class="section-label">Recording Mode</label>
+              <div class="mode-selector">
+                <button
+                  class="mode-btn"
+                  class:active={$recordingMode === 'ScreenOnly'}
+                  on:click={() => recordingMode.set('ScreenOnly')}
+                  disabled={$isRecording}
+                >
+                  <span class="mode-icon">🖥️</span>
+                  <span class="mode-label">Screen Only</span>
+                </button>
+                <button
+                  class="mode-btn"
+                  class:active={$recordingMode === 'WebcamOnly'}
+                  on:click={() => recordingMode.set('WebcamOnly')}
+                  disabled={$isRecording || $webcamSources.length === 0}
+                >
+                  <span class="mode-icon">📹</span>
+                  <span class="mode-label">Webcam Only</span>
+                </button>
+                <button
+                  class="mode-btn"
+                  class:active={$recordingMode === 'ScreenAndWebcam'}
+                  on:click={() => recordingMode.set('ScreenAndWebcam')}
+                  disabled={$isRecording || $webcamSources.length === 0}
+                >
+                  <span class="mode-icon">🖥️+📹</span>
+                  <span class="mode-label">Both</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Webcam Selection (shown if webcam mode enabled) -->
+            {#if $isWebcamMode && $webcamSources.length > 0}
+              <div class="section">
+                <label class="section-label">Select Webcam</label>
+                <div class="sources-grid">
+                  {#each $webcamSources as webcam}
+                    <button
+                      class="source-card"
+                      class:selected={$selectedWebcam === webcam.id}
+                      on:click={() => selectedWebcam.set(webcam.id)}
+                      disabled={$isRecording}
+                    >
+                      {#if webcam.preview_path}
+                        <img
+                          src={convertFileSrc(webcam.preview_path)}
+                          alt={webcam.name}
+                          class="source-preview"
+                        />
+                      {:else}
+                        <div class="source-placeholder">
+                          <span class="placeholder-icon">📹</span>
+                        </div>
+                      {/if}
+                      <div class="source-info">
+                        <div class="source-name">{webcam.name}</div>
+                      </div>
+                    </button>                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <!-- Warning when no webcam detected -->
+            {#if $isWebcamMode && $webcamSources.length === 0}
+              <div class="warning-message">
+                ⚠️ No webcam detected. Please connect a camera to use webcam recording modes.
+              </div>
+            {/if}
 
             <!-- Audio Input -->
             <div class="section">
@@ -881,5 +970,66 @@
     color: #e53e3e;
     text-align: center;
     font-size: 0.9rem;
+  }
+
+  /* Recording Mode Selector */
+  .mode-selector {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+  }
+
+  .mode-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: #2d2d2d;
+    border: 2px solid #3d3d3d;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #fff;
+  }
+
+  .mode-btn:hover:not(:disabled) {
+    background: #3d3d3d;
+    border-color: #667eea;
+  }
+
+  .mode-btn.active {
+    background: #667eea;
+    border-color: #667eea;
+    color: white;
+  }
+
+  .mode-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .mode-icon {
+    font-size: 2rem;
+  }
+
+  .mode-label {
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  /* Warning Message */
+  .warning-message {
+    padding: 1rem;
+    background: rgba(237, 137, 54, 0.1);
+    border: 1px solid #ed8936;
+    border-radius: 6px;
+    color: #ed8936;
+    font-size: 0.9rem;
+  }
+
+  /* Placeholder Icon */
+  .placeholder-icon {
+    font-size: 2.5rem;
   }
 </style>

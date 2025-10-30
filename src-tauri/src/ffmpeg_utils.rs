@@ -47,19 +47,38 @@ pub fn find_ffmpeg_path() -> Result<PathBuf, String> {
 
 /// Get the bundled FFprobe executable path
 ///
-/// This function returns the path to the FFprobe binary that is bundled with the application.
+/// This function first checks for a system-installed FFprobe, then falls back to the bundled
+/// FFprobe binary. In development mode, it also checks the src-tauri/binaries directory.
 /// FFprobe is used for extracting metadata from media files.
 ///
 /// # Returns
-/// - `Ok(PathBuf)`: Path to the bundled ffprobe binary
+/// - `Ok(PathBuf)`: Path to the ffprobe binary (system or bundled)
 /// - `Err(String)`: Error message if the binary cannot be located
 pub fn find_ffprobe_path() -> Result<PathBuf, String> {
+    // First, try to find system FFprobe
+    #[cfg(target_os = "macos")]
+    {
+        // Common macOS locations for Homebrew FFprobe
+        let system_paths = vec![
+            PathBuf::from("/opt/homebrew/bin/ffprobe"), // Apple Silicon Homebrew
+            PathBuf::from("/usr/local/bin/ffprobe"),    // Intel Homebrew
+        ];
+
+        for path in system_paths {
+            if path.exists() {
+                log::info!("Using system FFprobe at: {:?}", path);
+                return Ok(path);
+            }
+        }
+    }
+
+    // Fall back to bundled FFprobe
     let ffprobe_path = get_bundled_binary_path("ffprobe")?;
 
     // Verify the binary exists
     if !ffprobe_path.exists() {
         return Err(format!(
-            "Bundled FFprobe binary not found at: {:?}\nThis is a packaging error. Please reinstall the application.",
+            "No FFprobe binary found. Please install FFmpeg via Homebrew: brew install ffmpeg\nAttempted paths:\n  - /opt/homebrew/bin/ffprobe\n  - /usr/local/bin/ffprobe\n  - {:?}",
             ffprobe_path
         ));
     }
@@ -72,6 +91,8 @@ pub fn find_ffprobe_path() -> Result<PathBuf, String> {
 ///
 /// Tauri's externalBin feature places bundled binaries in the same directory as the main executable.
 /// On macOS, this is typically: ClipForge.app/Contents/MacOS/
+///
+/// In development mode, this function also checks the src-tauri/binaries/ directory.
 ///
 /// # Arguments
 /// * `binary_name` - The name of the binary (e.g., "ffmpeg" or "ffprobe")
@@ -103,8 +124,37 @@ fn get_bundled_binary_path(binary_name: &str) -> Result<PathBuf, String> {
     // Fall back to simple name (e.g., ffmpeg)
     let binary_path = exe_dir.join(binary_name);
 
+    if binary_path.exists() {
+        log::debug!(
+            "Found bundled binary '{}' at: {:?}",
+            binary_name,
+            binary_path
+        );
+        return Ok(binary_path);
+    }
+
+    // Development mode fallback: check src-tauri/binaries/
+    // In dev mode, exe_path is typically: /path/to/project/src-tauri/target/debug/clipforge
+    // We need to navigate to: /path/to/project/src-tauri/binaries/
+    #[cfg(debug_assertions)]
+    {
+        if let Some(target_dir) = exe_dir.parent() {
+            if let Some(src_tauri_dir) = target_dir.parent() {
+                let dev_binary_path = src_tauri_dir.join("binaries").join(binary_name);
+                if dev_binary_path.exists() {
+                    log::info!(
+                        "Found development binary '{}' at: {:?}",
+                        binary_name,
+                        dev_binary_path
+                    );
+                    return Ok(dev_binary_path);
+                }
+            }
+        }
+    }
+
     log::debug!(
-        "Looking for bundled binary '{}' at: {:?}",
+        "Looking for bundled binary '{}' at: {:?} (does not exist)",
         binary_name,
         binary_path
     );

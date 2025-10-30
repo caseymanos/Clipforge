@@ -7,7 +7,7 @@ import { videoDir } from '@tauri-apps/api/path';
 export type RecordingStateType = 'Idle' | 'Recording' | 'Paused' | 'Finalizing' | 'Error';
 
 export interface RecordingSource {
-    type: 'screen' | 'window';  // Matches Rust serde tag
+    type: 'screen' | 'window' | 'webcam';  // Matches Rust serde tag
     id: string;
     name: string;
     width?: number;  // For Screen type
@@ -22,6 +22,7 @@ export interface AudioDevice {
 }
 
 export type AudioInputType = 'None' | 'SystemAudio' | 'Microphone' | 'Both';
+export type RecordingMode = 'ScreenOnly' | 'WebcamOnly' | 'ScreenAndWebcam';
 
 export interface CropRegion {
     x: number;
@@ -38,6 +39,9 @@ export interface RecordingConfig {
     audio_device_id?: string;
     show_cursor: boolean;
     crop_region?: CropRegion;
+    recording_mode?: RecordingMode;
+    webcam_source?: RecordingSource;
+    webcam_output_path?: string;
 }
 
 export interface RecordingState {
@@ -69,11 +73,26 @@ export const isLoadingSources = writable<boolean>(false);
 export const hasPermissions = writable<boolean | null>(null);
 export const recordingError = writable<string | null>(null);
 
+// Webcam recording stores
+export const recordingMode = writable<RecordingMode>('ScreenOnly');
+export const selectedWebcam = writable<string | null>(null);
+
 // Derived stores
 export const isRecording = derived(recordingState, $state => $state.state === 'Recording');
 export const isPaused = derived(recordingState, $state => $state.state === 'Paused');
 export const isIdle = derived(recordingState, $state => $state.state === 'Idle');
 export const isFinalizing = derived(recordingState, $state => $state.state === 'Finalizing');
+
+export const isDualMode = derived(recordingMode, $mode => $mode === 'ScreenAndWebcam');
+export const isWebcamMode = derived(recordingMode, $mode => $mode === 'WebcamOnly' || $mode === 'ScreenAndWebcam');
+
+export const webcamSources = derived(availableSources, $sources =>
+    $sources.filter((s: RecordingSource) => s.type === 'webcam')
+);
+
+export const screenSources = derived(availableSources, $sources =>
+    $sources.filter((s: RecordingSource) => s.type === 'screen' || s.type === 'window')
+);
 
 // Event listeners
 let unlistenStarted: UnlistenFn | null = null;
@@ -162,15 +181,18 @@ export async function requestRecordingPermissions(): Promise<boolean> {
     }
 }
 
+export type SourceTypeFilter = 'screen' | 'webcam' | 'window' | 'all';
+
 /**
- * Load available recording sources (screens and windows)
+ * Load available recording sources with optional filtering
+ * @param filter - Filter type: 'screen', 'webcam', 'window', or 'all' (default: 'all')
  */
-export async function loadRecordingSources(): Promise<void> {
+export async function loadRecordingSources(filter: SourceTypeFilter = 'all'): Promise<void> {
     isLoadingSources.set(true);
     recordingError.set(null);
 
     try {
-        const sources = await invoke<RecordingSource[]>('list_recording_sources');
+        const sources = await invoke<RecordingSource[]>('list_recording_sources', { filter });
         availableSources.set(sources);
 
         // Auto-select first source if none selected
@@ -183,6 +205,20 @@ export async function loadRecordingSources(): Promise<void> {
     } finally {
         isLoadingSources.set(false);
     }
+}
+
+/**
+ * Load screen sources only (screens and windows)
+ */
+export async function loadScreenSources(): Promise<void> {
+    return loadRecordingSources('screen');
+}
+
+/**
+ * Load webcam sources only
+ */
+export async function loadWebcamSources(): Promise<void> {
+    return loadRecordingSources('webcam');
 }
 
 /**
@@ -226,10 +262,32 @@ export async function startRecording(): Promise<boolean> {
             return false;
         }
 
-        // Generate output path - use Videos directory
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        // Get recording mode and webcam selection
+        const mode = await new Promise<RecordingMode>(resolve => {
+            const unsubscribe = recordingMode.subscribe(value => {
+                resolve(value);
+                unsubscribe();
+            });
+        });
+
+        const webcamId = await new Promise<string | null>(resolve => {
+            const unsubscribe = selectedWebcam.subscribe(value => {
+                resolve(value);
+                unsubscribe();
+            });
+        });
+
+        // Validate mode-specific requirements
+        if ((mode === 'WebcamOnly' || mode === 'ScreenAndWebcam') && !webcamId) {
+            recordingError.set('Please select a webcam source');
+            return false;
+        }
+
+        // Generate output paths
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
         const videoDirPath = await videoDir();
-        const outputPath = `${videoDirPath}/ClipForge/recording-${timestamp}.mp4`;
+        const outputPath = `${videoDirPath}/ClipForge/screen-${timestamp}.mp4`;
+        const webcamPath = `${videoDirPath}/ClipForge/webcam-${timestamp}.mp4`;
 
         // Convert quality from string to 1-10 scale
         const qualityMap = {
@@ -240,6 +298,16 @@ export async function startRecording(): Promise<boolean> {
         };
         const qualityValue = qualityMap[config.quality as keyof typeof qualityMap] || 7;
 
+        // Get webcam source object if needed
+        let webcamSource: RecordingSource | undefined;
+        if (mode === 'WebcamOnly' || mode === 'ScreenAndWebcam') {
+            webcamSource = sources.find(s => s.id === webcamId && s.type === 'webcam');
+            if (!webcamSource) {
+                recordingError.set('Selected webcam not found');
+                return false;
+            }
+        }
+
         const fullConfig: RecordingConfig = {
             output_path: outputPath,
             fps: config.fps || 30,
@@ -248,6 +316,9 @@ export async function startRecording(): Promise<boolean> {
             audio_input: config.audio_input || 'None',
             audio_device_id: config.audio_device_id,
             crop_region: config.crop_region,
+            recording_mode: mode,
+            webcam_source: webcamSource,
+            webcam_output_path: (mode === 'ScreenAndWebcam') ? webcamPath : undefined,
         };
 
         await invoke('start_recording', {
