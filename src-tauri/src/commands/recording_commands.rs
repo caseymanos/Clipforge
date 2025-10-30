@@ -125,7 +125,9 @@ pub async fn start_recording(
             drop(recorder); // Release lock before emitting
 
             // Emit duration update
-            let _ = app_clone.emit("recording:duration", duration);
+            let _ = app_clone.emit("recording:duration", serde_json::json!({
+                "duration": duration
+            }));
         }
     });
 
@@ -152,8 +154,10 @@ pub async fn stop_recording(
 
     let output_path_str = output_path.to_string_lossy().to_string();
 
-    // Emit event that recording stopped
-    let _ = app.emit("recording:stopped", output_path_str.clone());
+    // Emit event that recording stopped with file_path in payload
+    let _ = app.emit("recording:stopped", serde_json::json!({
+        "file_path": output_path_str.clone()
+    }));
 
     info!("Recording saved to: {}", output_path_str);
     Ok(output_path_str)

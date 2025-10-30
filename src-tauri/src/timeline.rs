@@ -85,6 +85,8 @@ impl TimelineService {
                 },
             ],
             duration: 0.0,
+            subtitle_track: None,
+            subtitle_enabled: false,
         };
 
         self.current_timeline = Some(timeline.clone());
@@ -322,6 +324,7 @@ impl TimelineService {
                 let first_clip = Clip {
                     id: Uuid::new_v4().to_string(),
                     media_file_id: original_clip.media_file_id.clone(),
+                    name: original_clip.name.clone(),
                     track_position: original_clip.track_position,
                     duration: split_offset,
                     trim_start: original_clip.trim_start,
@@ -335,6 +338,7 @@ impl TimelineService {
                 let second_clip = Clip {
                     id: Uuid::new_v4().to_string(),
                     media_file_id: original_clip.media_file_id.clone(),
+                    name: original_clip.name.clone(),
                     track_position: split_time,
                     duration: original_clip.duration - split_offset,
                     trim_start: source_split_time,
@@ -467,6 +471,7 @@ mod tests {
         Clip {
             id: Uuid::new_v4().to_string(),
             media_file_id: "test-media".to_string(),
+            name: Some("test-clip.mp4".to_string()),
             track_position: position,
             duration,
             trim_start: 0.0,

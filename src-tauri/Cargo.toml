@@ -10,7 +10,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Core Tauri
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
@@ -43,6 +44,14 @@ which = "6.0"
 
 # Module 4: Screen Recording
 async-trait = "0.1"
+libc = "0.2"
+
+# Module 8: Video Preview (LRU cache for preview frames)
+lru = "0.12"
+base64 = "0.22"
+
+# AI Subtitle Generation
+reqwest = { version = "0.11", features = ["json", "multipart", "rustls-tls"] }
 
 [features]
 default = ["custom-protocol"]

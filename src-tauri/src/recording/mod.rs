@@ -40,12 +40,16 @@ pub enum RecordingSource {
         name: String,
         width: u32,
         height: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        preview_path: Option<String>,
     },
     /// Individual window
     Window {
         id: String,
         name: String,
         app_name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        preview_path: Option<String>,
     },
 }
 
@@ -65,6 +69,21 @@ impl RecordingSource {
     }
 }
 
+/// Audio input type for recording
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AudioInputType {
+    None,
+    Microphone,
+    SystemAudio,
+    Both,
+}
+
+impl Default for AudioInputType {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 /// Recording configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConfig {
@@ -79,18 +98,35 @@ pub struct RecordingConfig {
     #[serde(default = "default_quality")]
     pub quality: u8,
 
-    /// Whether to record audio
-    #[serde(default = "default_audio")]
-    pub record_audio: bool,
+    /// Audio input type (default: None)
+    #[serde(default)]
+    pub audio_input: AudioInputType,
+
+    /// Optional audio device ID for specific device selection
+    #[serde(default)]
+    pub audio_device_id: Option<String>,
 
     /// Whether to show cursor
     #[serde(default = "default_cursor")]
     pub show_cursor: bool,
+
+    /// Optional screen region to record (x, y, width, height)
+    /// If None, records the entire screen
+    #[serde(default)]
+    pub crop_region: Option<CropRegion>,
+}
+
+/// Screen region for cropped recording
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CropRegion {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 fn default_fps() -> u32 { 30 }
 fn default_quality() -> u8 { 7 }
-fn default_audio() -> bool { false }
 fn default_cursor() -> bool { true }
 
 impl Default for RecordingConfig {
@@ -99,8 +135,10 @@ impl Default for RecordingConfig {
             output_path: PathBuf::new(),
             fps: default_fps(),
             quality: default_quality(),
-            record_audio: default_audio(),
+            audio_input: AudioInputType::default(),
+            audio_device_id: None,
             show_cursor: default_cursor(),
+            crop_region: None,
         }
     }
 }
@@ -148,6 +186,7 @@ mod tests {
             name: "Main Display".to_string(),
             width: 1920,
             height: 1080,
+            preview_path: None,
         };
 
         assert_eq!(screen.id(), "screen-1");
@@ -160,7 +199,8 @@ mod tests {
 
         assert_eq!(config.fps, 30);
         assert_eq!(config.quality, 7);
-        assert!(!config.record_audio);
+        assert_eq!(config.audio_input, AudioInputType::None);
         assert!(config.show_cursor);
+        assert!(config.crop_region.is_none());
     }
 }

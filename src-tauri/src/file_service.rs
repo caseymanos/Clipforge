@@ -11,7 +11,7 @@ use chrono::Utc;
 use crate::database::Database;
 use crate::thumbnail::ThumbnailGenerator;
 use crate::metadata::extract_metadata;
-use crate::models::{MediaFile, FileError};
+use crate::models::{MediaFile, MediaType, FileError, ProxyStatus};
 
 /// Service for managing media file imports and library
 pub struct FileService {
@@ -67,15 +67,26 @@ impl FileService {
         let metadata = extract_metadata(&path).await
             .map_err(|e| FileError::MetadataError(e.to_string()))?;
 
-        log::debug!("Extracted metadata: duration={:.2}s, resolution={}x{}",
-                   metadata.duration, metadata.resolution.width, metadata.resolution.height);
+        // Log resolution info (handle optional resolution for audio files)
+        if let Some(ref res) = metadata.resolution {
+            log::debug!("Extracted metadata: duration={:.2}s, resolution={}x{}, type={:?}",
+                       metadata.duration, res.width, res.height, metadata.media_type);
+        } else {
+            log::debug!("Extracted metadata: duration={:.2}s, type={:?} (no video)",
+                       metadata.duration, metadata.media_type);
+        }
 
-        // 5. Generate thumbnail (at 5 seconds into the video, or 0 if shorter)
-        let thumb_timestamp = if metadata.duration > 5.0 { 5.0 } else { 0.0 };
-        let thumbnail_path = self.thumbnail_generator
-            .generate(&path, thumb_timestamp)
-            .await
-            .map_err(|_| FileError::ThumbnailError)?;
+        // 5. Generate thumbnail (only for video files, skip for audio)
+        let thumbnail_path = if metadata.media_type == MediaType::Video {
+            let thumb_timestamp = if metadata.duration > 5.0 { 5.0 } else { 0.0 };
+            Some(self.thumbnail_generator
+                .generate(&path, thumb_timestamp)
+                .await
+                .map_err(|_| FileError::ThumbnailError)?)
+        } else {
+            // Audio files: no thumbnail
+            None
+        };
 
         // 6. Create MediaFile object
         let media_file = MediaFile {
@@ -85,13 +96,17 @@ impl FileService {
                 .ok_or(FileError::InvalidFormat)?
                 .to_string_lossy()
                 .to_string(),
+            media_type: metadata.media_type,
             duration: metadata.duration,
             resolution: metadata.resolution,
             codec: metadata.codec,
             file_size,  // Use previously calculated file_size
-            thumbnail_path: Some(thumbnail_path),
+            thumbnail_path,
             hash,
             imported_at: Utc::now(),
+            proxy_path: None,                   // No proxy initially
+            has_proxy: false,                   // No proxy initially
+            proxy_status: ProxyStatus::None,    // No proxy initially
         };
 
         // 7. Save to database (persistent)

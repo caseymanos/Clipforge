@@ -30,6 +30,7 @@
     }
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "ClipForge",
@@ -43,7 +44,14 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: stream: https: asset:; media-src 'self' stream: asset:; connect-src 'self' ipc: https:"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: stream: https: asset:; media-src 'self' stream: asset:; connect-ws 'self' ipc: https:",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$HOME/**",
+          "$CACHE/**"
+        ]
+      }
     }
   }
 }

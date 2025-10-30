@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use crate::models::{MediaFile, Resolution, VideoCodec};
+use crate::models::{MediaFile, MediaType, Resolution, MediaCodec, ProxyStatus};
 
 /// Database wrapper for media library storage
 pub struct Database {
@@ -46,6 +46,47 @@ impl Database {
     /// Initialize database schema
     fn init_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.execute_batch(include_str!("schema.sql"))?;
+
+        // Run migrations for existing databases
+        Self::run_migrations(conn)?;
+
+        Ok(())
+    }
+
+    /// Run database migrations to add new columns to existing tables
+    fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
+        // Check if proxy columns exist, if not add them
+        let has_proxy_path = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('media_files') WHERE name='proxy_path'",
+            [],
+            |row| row.get::<_, i32>(0)
+        )? > 0;
+
+        if !has_proxy_path {
+            log::info!("Running migration: Adding proxy support columns");
+            conn.execute_batch(
+                "ALTER TABLE media_files ADD COLUMN proxy_path TEXT;
+                 ALTER TABLE media_files ADD COLUMN has_proxy INTEGER DEFAULT 0;
+                 ALTER TABLE media_files ADD COLUMN proxy_status TEXT DEFAULT 'none';"
+            )?;
+            log::info!("Migration complete: Proxy columns added");
+        }
+
+        // Check if media_type column exists, if not add it
+        let has_media_type = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('media_files') WHERE name='media_type'",
+            [],
+            |row| row.get::<_, i32>(0)
+        )? > 0;
+
+        if !has_media_type {
+            log::info!("Running migration: Adding media_type column for audio support");
+            conn.execute_batch(
+                "ALTER TABLE media_files ADD COLUMN media_type TEXT NOT NULL DEFAULT 'video';"
+            )?;
+            log::info!("Migration complete: media_type column added");
+        }
+
         Ok(())
     }
 
@@ -72,21 +113,49 @@ impl Database {
             )
             .transpose()?;
 
+        let proxy_str = file.proxy_path.as_ref()
+            .map(|p| p.to_str()
+                .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Proxy path contains invalid UTF-8 characters"
+                    ))
+                ))
+            )
+            .transpose()?;
+
+        let proxy_status_str = match file.proxy_status {
+            ProxyStatus::None => "none",
+            ProxyStatus::Generating => "generating",
+            ProxyStatus::Ready => "ready",
+            ProxyStatus::Failed => "failed",
+        };
+
+        let media_type_str = match file.media_type {
+            MediaType::Video => "video",
+            MediaType::Audio => "audio",
+            MediaType::Image => "image",
+        };
+
         conn.execute(
-            "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 file.id,
                 path_str,
                 file.filename,
+                media_type_str,
                 file.duration,
-                file.resolution.width,
-                file.resolution.height,
+                file.resolution.as_ref().map(|r| r.width),
+                file.resolution.as_ref().map(|r| r.height),
                 file.codec.video,
                 file.codec.audio,
                 file.file_size,
                 thumbnail_str,
                 file.hash,
                 file.imported_at.to_rfc3339(),
+                proxy_str,
+                file.has_proxy as i32,
+                proxy_status_str,
             ],
         )?;
         Ok(())
@@ -171,29 +240,53 @@ impl Database {
 
     /// Convert database row to MediaFile struct
     fn row_to_media_file(row: &rusqlite::Row) -> Result<MediaFile, rusqlite::Error> {
+        let proxy_status_str: Option<String> = row.get(15).ok();
+        let proxy_status = match proxy_status_str.as_deref() {
+            Some("generating") => ProxyStatus::Generating,
+            Some("ready") => ProxyStatus::Ready,
+            Some("failed") => ProxyStatus::Failed,
+            _ => ProxyStatus::None,
+        };
+
+        let media_type_str: String = row.get(3)?;
+        let media_type = match media_type_str.as_str() {
+            "audio" => MediaType::Audio,
+            "image" => MediaType::Image,
+            _ => MediaType::Video,
+        };
+
+        // Resolution is optional for audio files
+        let width: Option<u32> = row.get(5)?;
+        let height: Option<u32> = row.get(6)?;
+        let resolution = match (width, height) {
+            (Some(w), Some(h)) => Some(Resolution { width: w, height: h }),
+            _ => None,
+        };
+
         Ok(MediaFile {
             id: row.get(0)?,
             path: PathBuf::from(row.get::<_, String>(1)?),
             filename: row.get(2)?,
-            duration: row.get(3)?,
-            resolution: Resolution {
-                width: row.get(4)?,
-                height: row.get(5)?,
+            media_type,
+            duration: row.get(4)?,
+            resolution,
+            codec: MediaCodec {
+                video: row.get(7)?,
+                audio: row.get(8)?,
             },
-            codec: VideoCodec {
-                video: row.get(6)?,
-                audio: row.get(7)?,
-            },
-            file_size: row.get(8)?,
-            thumbnail_path: row.get::<_, Option<String>>(9)?.map(PathBuf::from),
-            hash: row.get(10)?,
-            imported_at: row.get::<_, String>(11)?
+            file_size: row.get(9)?,
+            thumbnail_path: row.get::<_, Option<String>>(10)?.map(PathBuf::from),
+            hash: row.get(11)?,
+            imported_at: row.get::<_, String>(12)?
                 .parse()
                 .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                    11,
+                    12,
                     rusqlite::types::Type::Text,
                     Box::new(e)
                 ))?,
+            proxy_path: row.get::<_, Option<String>>(13).ok().flatten().map(PathBuf::from),
+            has_proxy: row.get::<_, Option<i32>>(14).ok().flatten().unwrap_or(0) != 0,
+            proxy_status,
         })
     }
 
@@ -223,26 +316,91 @@ impl Database {
                 )
                 .transpose()?;
 
+            let proxy_str = file.proxy_path.as_ref()
+                .map(|p| p.to_str()
+                    .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "Proxy path contains invalid UTF-8 characters"
+                        ))
+                    ))
+                )
+                .transpose()?;
+
+            let proxy_status_str = match file.proxy_status {
+                ProxyStatus::None => "none",
+                ProxyStatus::Generating => "generating",
+                ProxyStatus::Ready => "ready",
+                ProxyStatus::Failed => "failed",
+            };
+
+            let media_type_str = match file.media_type {
+                MediaType::Video => "video",
+                MediaType::Audio => "audio",
+                MediaType::Image => "image",
+            };
+
             tx.execute(
-                "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                "INSERT INTO media_files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
                     file.id,
                     path_str,
                     file.filename,
+                    media_type_str,
                     file.duration,
-                    file.resolution.width,
-                    file.resolution.height,
+                    file.resolution.as_ref().map(|r| r.width),
+                    file.resolution.as_ref().map(|r| r.height),
                     file.codec.video,
                     file.codec.audio,
                     file.file_size,
                     thumbnail_str,
                     file.hash,
                     file.imported_at.to_rfc3339(),
+                    proxy_str,
+                    file.has_proxy as i32,
+                    proxy_status_str,
                 ],
             )?;
         }
 
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Update proxy status and path for a media file
+    pub fn update_proxy_status(
+        &self,
+        file_id: &str,
+        proxy_path: Option<PathBuf>,
+        status: ProxyStatus,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+
+        let proxy_str = proxy_path.as_ref()
+            .map(|p| p.to_str()
+                .ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Proxy path contains invalid UTF-8 characters"
+                    ))
+                ))
+            )
+            .transpose()?;
+
+        let status_str = match status {
+            ProxyStatus::None => "none",
+            ProxyStatus::Generating => "generating",
+            ProxyStatus::Ready => "ready",
+            ProxyStatus::Failed => "failed",
+        };
+
+        let has_proxy = matches!(status, ProxyStatus::Ready) as i32;
+
+        conn.execute(
+            "UPDATE media_files SET proxy_path = ?1, has_proxy = ?2, proxy_status = ?3 WHERE id = ?4",
+            params![proxy_str, has_proxy, status_str, file_id],
+        )?;
+
         Ok(())
     }
 }

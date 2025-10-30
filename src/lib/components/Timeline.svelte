@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import Konva from 'konva';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   import {
     timelineStore,
     playheadTime,
@@ -10,10 +12,14 @@
     moveClip,
     selectClip,
     updateClipDuration,
+    addMediaFileToTimeline,
+    removeClip,
+    splitClipAtPlayhead,
     type Timeline,
     type Track,
     type Clip
   } from '../stores/timelineStore';
+  import { mediaLibraryStore } from '../stores/mediaLibraryStore';
 
   // Props
   export let width = 1200;
@@ -41,6 +47,19 @@
   let currentScrollOffset: number;
   let currentPlayheadTime: number;
   let currentSelectedClipId: string | null;
+
+  // Confirm dialog state
+  let showConfirmDialog = false;
+  let confirmMessage = '';
+  let confirmDialogX = 0;
+  let confirmDialogY = 0;
+  let pendingDeleteClipId: string | null = null;
+
+  // Context menu state
+  let showContextMenu = false;
+  let contextMenuX = 0;
+  let contextMenuY = 0;
+  let contextMenuClipId: string | null = null;
 
   // Subscribe to stores
   const unsubTimeline = timelineStore.subscribe(value => { currentTimeline = value; renderTimeline(); });
@@ -96,6 +115,8 @@
   });
 
   function renderBackground() {
+    if (!backgroundLayer || !currentTimeline || !currentTimeline.tracks) return;
+
     backgroundLayer.destroyChildren();
 
     // Draw ruler background
@@ -139,7 +160,7 @@
   }
 
   function renderTimeline() {
-    if (!trackLayer) return;
+    if (!trackLayer || !currentTimeline || !currentTimeline.tracks) return;
 
     trackLayer.destroyChildren();
 
@@ -178,7 +199,7 @@
     const clipText = new Konva.Text({
       x: clipX + 8,
       y: trackY + 15,
-      text: `Clip ${clip.id.substring(0, 8)}`,
+      text: clip.name || `Clip ${clip.id.substring(0, 8)}`,  // Use filename if available, fallback to ID
       fontSize: 12,
       fill: '#ffffff',
       listening: false,
@@ -190,16 +211,14 @@
     });
 
     clipRect.on('dragmove', (e) => {
-      const target = e.target;
-      const newX = target.x();
-      const newTime = (newX + currentScrollOffset) / currentPixelsPerSecond;
+      // Allow free movement during drag for smooth UX
+      // Constraints will be applied on dragend when the clip is released
 
-      // Constrain to timeline bounds
-      const constrainedTime = Math.max(0, newTime);
-      target.x((constrainedTime * currentPixelsPerSecond) - currentScrollOffset);
-
-      // Snap to grid (optional)
-      // const snappedTime = Math.round(constrainedTime * 4) / 4; // Snap to 0.25s
+      // Optional: Add visual feedback during drag (e.g., snap guides)
+      // const target = e.target;
+      // const newX = target.x();
+      // const newTime = (newX + currentScrollOffset) / currentPixelsPerSecond;
+      // const snappedTime = Math.round(newTime * 4) / 4; // Snap to 0.25s grid
     });
 
     clipRect.on('dragend', (e) => {
@@ -233,18 +252,40 @@
       selectClip(clip.id);
     });
 
-    // Resize handles (trim functionality)
+    // Right-click context menu
+    clipRect.on('contextmenu', (e) => {
+      e.evt.preventDefault();
+      selectClip(clip.id);
+
+      // Show context menu near cursor (convert to screen coordinates)
+      const stageBox = container.getBoundingClientRect();
+      const mousePos = stage.getPointerPosition();
+      if (mousePos) {
+        contextMenuX = stageBox.left + mousePos.x;
+        contextMenuY = stageBox.top + mousePos.y;
+        contextMenuClipId = clip.id;
+        showContextMenu = true;
+      }
+    });
+
+    trackLayer.add(clipRect);
+    trackLayer.add(clipText);
+
+    // Resize handles (trim functionality) - add AFTER clip rect/text so they appear on top
     if (isSelected) {
       // Left handle
       const leftHandle = new Konva.Rect({
         x: clipX,
         y: trackY + 5,
-        width: 8,
+        width: 12,
         height: TRACK_HEIGHT - 10,
-        fill: '#ffffff',
-        opacity: 0.8,
+        fill: '#667eea',
+        opacity: 1.0,
         cursor: 'ew-resize',
         draggable: true,
+        shadowColor: 'black',
+        shadowBlur: 4,
+        shadowOpacity: 0.3,
         dragBoundFunc: (pos) => {
           const maxX = clipX + clipWidth - 20;
           return {
@@ -256,8 +297,6 @@
 
       leftHandle.on('dragmove', (e) => {
         const dx = e.target.x() - clipX;
-        const newTrimStart = clip.trim_start - (dx / currentPixelsPerSecond);
-        const newDuration = clip.duration + (dx / currentPixelsPerSecond);
 
         // Update visually
         clipRect.x(clipRect.x() + dx);
@@ -266,20 +305,41 @@
 
       leftHandle.on('dragend', (e) => {
         const dx = e.target.x() - clipX;
-        const newDuration = Math.max(0.5, clip.duration + (dx / currentPixelsPerSecond));
-        updateClipDuration(clip.id, newDuration);
+        const timeDelta = dx / currentPixelsPerSecond;
+
+        // Get source file to check bounds
+        const sourceFile = $mediaLibraryStore.find(f => f.id === clip.media_file_id);
+        if (!sourceFile) return;
+
+        // Calculate new trim_start and duration
+        let newTrimStart = clip.trim_start + timeDelta;
+
+        // Constrain: can't trim before start of source file (0)
+        newTrimStart = Math.max(0, newTrimStart);
+
+        // Constrain: can't extend beyond original clip end
+        const maxTrimStart = clip.trim_end - 0.5; // Must leave at least 0.5s
+        newTrimStart = Math.min(maxTrimStart, newTrimStart);
+
+        const newDuration = clip.trim_end - newTrimStart;
+
+        // Update both trim_start and duration
+        updateClipDuration(clip.id, newDuration, newTrimStart, clip.trim_end);
       });
 
       // Right handle
       const rightHandle = new Konva.Rect({
-        x: clipX + clipWidth - 8,
+        x: clipX + clipWidth - 12,
         y: trackY + 5,
-        width: 8,
+        width: 12,
         height: TRACK_HEIGHT - 10,
-        fill: '#ffffff',
-        opacity: 0.8,
+        fill: '#667eea',
+        opacity: 1.0,
         cursor: 'ew-resize',
         draggable: true,
+        shadowColor: 'black',
+        shadowBlur: 4,
+        shadowOpacity: 0.3,
         dragBoundFunc: (pos) => {
           return {
             x: Math.max(clipX + 20, pos.x),
@@ -289,62 +349,98 @@
       });
 
       rightHandle.on('dragmove', (e) => {
-        const newWidth = e.target.x() - clipX + 8;
+        const newWidth = e.target.x() - clipX + 12;
         clipRect.width(Math.max(20, newWidth));
       });
 
       rightHandle.on('dragend', (e) => {
-        const newWidth = e.target.x() - clipX + 8;
-        const newDuration = Math.max(0.5, newWidth / currentPixelsPerSecond);
-        updateClipDuration(clip.id, newDuration);
+        const newWidth = e.target.x() - clipX + 12;
+        let newDuration = Math.max(0.5, newWidth / currentPixelsPerSecond);
+
+        // Get source file to check bounds
+        const sourceFile = $mediaLibraryStore.find(f => f.id === clip.media_file_id);
+        if (!sourceFile) return;
+
+        // Calculate new trim_end based on new duration
+        let newTrimEnd = clip.trim_start + newDuration;
+
+        // Constrain: can't extend beyond source file duration
+        newTrimEnd = Math.min(sourceFile.duration, newTrimEnd);
+
+        // Recalculate duration based on constrained trim_end
+        newDuration = newTrimEnd - clip.trim_start;
+
+        // Update both duration and trim_end
+        updateClipDuration(clip.id, newDuration, clip.trim_start, newTrimEnd);
       });
 
       trackLayer.add(leftHandle);
       trackLayer.add(rightHandle);
     }
-
-    trackLayer.add(clipRect);
-    trackLayer.add(clipText);
   }
 
+  let isDraggingPlayhead = false;
+  let playheadLine: Konva.Line | null = null;
+  let playheadHandle: Konva.Circle | null = null;
+
   function renderPlayhead() {
-    if (!playheadLayer) return;
+    if (!playheadLayer || isDraggingPlayhead) return;  // Skip rendering during drag
 
     playheadLayer.destroyChildren();
 
     const playheadX = (currentPlayheadTime * currentPixelsPerSecond) - currentScrollOffset;
 
     // Playhead line
-    const line = new Konva.Line({
+    playheadLine = new Konva.Line({
       points: [playheadX, 0, playheadX, height],
       stroke: '#ff4444',
       strokeWidth: 2,
       listening: false,
     });
 
-    // Playhead handle
-    const handle = new Konva.Circle({
+    // Playhead handle with larger hit area for easier grabbing
+    playheadHandle = new Konva.Circle({
       x: playheadX,
       y: RULER_HEIGHT / 2,
-      radius: 8,
+      radius: 12,  // Increased from 8 to 12 for easier grabbing
       fill: '#ff4444',
       draggable: true,
+      hitStrokeWidth: 20,  // Larger invisible hit area for easier clicking
       dragBoundFunc: (pos) => {
+        // Simplified - just prevent negative positions
         return {
-          x: Math.max(0, Math.min(width, pos.x)),
+          x: Math.max(0, pos.x),
           y: RULER_HEIGHT / 2,
         };
       },
     });
 
-    handle.on('dragmove', (e) => {
+    playheadHandle.on('dragstart', () => {
+      isDraggingPlayhead = true;
+    });
+
+    playheadHandle.on('dragmove', (e) => {
       const newX = e.target.x();
       const newTime = (newX + currentScrollOffset) / currentPixelsPerSecond;
+
+      // Update line position manually without re-rendering
+      if (playheadLine) {
+        playheadLine.points([newX, 0, newX, height]);
+        playheadLayer.batchDraw();
+      }
+
+      // Update store (won't trigger re-render because of isDraggingPlayhead flag)
       playheadTime.set(Math.max(0, newTime));
     });
 
-    playheadLayer.add(line);
-    playheadLayer.add(handle);
+    playheadHandle.on('dragend', () => {
+      isDraggingPlayhead = false;
+      // Re-render to ensure everything is synced
+      renderPlayhead();
+    });
+
+    playheadLayer.add(playheadLine);
+    playheadLayer.add(playheadHandle);
     playheadLayer.batchDraw();
   }
 
@@ -379,6 +475,133 @@
     const newOffset = currentScrollOffset + delta;
     scrollOffset.set(Math.max(0, newOffset));
   }
+
+  // Handle confirm dialog response
+  function handleConfirmResponse(event: CustomEvent) {
+    if (event.detail.confirmed && pendingDeleteClipId) {
+      removeClip(pendingDeleteClipId);
+    }
+    // Reset state
+    pendingDeleteClipId = null;
+    showConfirmDialog = false;
+  }
+
+  // Handle context menu selection
+  async function handleContextMenuSelect(event: CustomEvent) {
+    const action = event.detail.action;
+    showContextMenu = false;
+
+    if (!contextMenuClipId) return;
+
+    if (action === 'split') {
+      try {
+        await splitClipAtPlayhead();
+        console.log('Clip split successfully from context menu');
+      } catch (error) {
+        console.error('Failed to split clip:', error);
+        alert(error instanceof Error ? error.message : 'Failed to split clip');
+      }
+    } else if (action === 'delete') {
+      // Find the clip name
+      let clipName = '';
+      for (const track of currentTimeline.tracks) {
+        const clip = track.clips.find(c => c.id === contextMenuClipId);
+        if (clip) {
+          clipName = clip.name || `Clip ${clip.id.substring(0, 8)}`;
+          break;
+        }
+      }
+      // Show confirmation dialog
+      confirmMessage = `Delete "${clipName}"?`;
+      confirmDialogX = window.innerWidth / 2;
+      confirmDialogY = window.innerHeight / 2;
+      pendingDeleteClipId = contextMenuClipId;
+      showConfirmDialog = true;
+    }
+
+    contextMenuClipId = null;
+  }
+
+  // Drag-and-drop handlers for adding media to timeline
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  async function handleDrop(e: DragEvent) {
+    e.preventDefault();
+
+    if (!e.dataTransfer) return;
+
+    // Get MediaFile data
+    const data = e.dataTransfer.getData('application/json');
+    if (!data) return;
+
+    try {
+      const mediaFile = JSON.parse(data);
+
+      // Calculate drop position from mouse X coordinate
+      const rect = container.getBoundingClientRect();
+      const dropX = e.clientX - rect.left;
+      const timePosition = (dropX + currentScrollOffset) / currentPixelsPerSecond;
+
+      // Calculate drop track from mouse Y coordinate
+      const dropY = e.clientY - rect.top;
+      const trackIndex = Math.floor((dropY - RULER_HEIGHT) / (TRACK_HEIGHT + TRACK_PADDING));
+
+      // Get target track
+      const targetTrack = currentTimeline.tracks[trackIndex];
+
+      if (targetTrack && !targetTrack.locked) {
+        // Add file to timeline at drop position
+        await addMediaFileToTimeline(mediaFile, targetTrack.id, Math.max(0, timePosition));
+        console.log(`Dropped ${mediaFile.filename} on track ${targetTrack.id} at ${timePosition.toFixed(2)}s`);
+      } else {
+        console.warn('Cannot drop on locked or invalid track');
+      }
+    } catch (error) {
+      console.error('Failed to handle drop:', error);
+    }
+  }
+
+  async function handleKeyDown(e: KeyboardEvent) {
+    // Split clip at playhead with Cmd/Ctrl+B
+    if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+      e.preventDefault();
+      try {
+        await splitClipAtPlayhead();
+        console.log('Clip split successfully at playhead position');
+      } catch (error) {
+        console.error('Failed to split clip:', error);
+        alert(error instanceof Error ? error.message : 'Failed to split clip');
+      }
+      return;
+    }
+
+    // Delete selected clip with Delete or Backspace key
+    if ((e.key === 'Delete' || e.key === 'Backspace') && currentSelectedClipId) {
+      e.preventDefault();
+
+      // Find the selected clip name
+      let clipName = '';
+      for (const track of currentTimeline.tracks) {
+        const clip = track.clips.find(c => c.id === currentSelectedClipId);
+        if (clip) {
+          clipName = clip.name || `Clip ${clip.id.substring(0, 8)}`;
+          break;
+        }
+      }
+
+      // Show custom confirm dialog at center of screen
+      confirmMessage = `Delete "${clipName}"?`;
+      confirmDialogX = window.innerWidth / 2;
+      confirmDialogY = window.innerHeight / 2;
+      pendingDeleteClipId = currentSelectedClipId;
+      showConfirmDialog = true;
+    }
+  }
 </script>
 
 <div class="timeline-container">
@@ -387,6 +610,9 @@
     bind:this={container}
     class="timeline-canvas"
     on:wheel={handleScroll}
+    on:dragover={handleDragOver}
+    on:drop={handleDrop}
+    on:keydown={handleKeyDown}
     role="application"
     aria-label="Timeline editor"
     tabindex="0"
@@ -404,6 +630,25 @@
     </button>
   </div>
 </div>
+
+<ConfirmDialog
+  bind:show={showConfirmDialog}
+  message={confirmMessage}
+  x={confirmDialogX}
+  y={confirmDialogY}
+  on:confirm={handleConfirmResponse}
+/>
+
+<ContextMenu
+  bind:show={showContextMenu}
+  x={contextMenuX}
+  y={contextMenuY}
+  options={[
+    { label: 'Split Clip', action: 'split' },
+    { label: 'Delete', action: 'delete' }
+  ]}
+  on:select={handleContextMenuSelect}
+/>
 
 <style>
   .timeline-container {

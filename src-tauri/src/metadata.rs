@@ -1,10 +1,20 @@
 use std::path::Path;
 use std::process::Command;
 use serde_json::Value;
-use crate::models::{FileMetadata, Resolution, VideoCodec, MetadataError};
+use crate::models::{FileMetadata, MediaType, Resolution, MediaCodec, MetadataError};
+use crate::ffmpeg_utils;
 
 /// Extract video metadata using FFprobe
 pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError> {
+    // Find bundled FFprobe binary
+    let ffprobe_path = ffmpeg_utils::find_ffprobe_path()
+        .map_err(|e| MetadataError::IoError(
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("FFprobe not found: {}", e)
+            )
+        ))?;
+
     let path_str = path.to_str()
         .ok_or_else(|| MetadataError::IoError(
             std::io::Error::new(
@@ -13,7 +23,7 @@ pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError
             )
         ))?;
 
-    let output = Command::new("ffprobe")
+    let output = Command::new(&ffprobe_path)
         .args([
             "-v", "quiet",
             "-print_format", "json",
@@ -30,15 +40,14 @@ pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError
 
     let json: Value = serde_json::from_slice(&output.stdout)?;
 
-    // Extract video stream info
+    // Extract stream info
     let streams = json["streams"]
         .as_array()
         .ok_or(MetadataError::FFprobeError)?;
 
     let video_stream = streams
         .iter()
-        .find(|s| s["codec_type"] == "video")
-        .ok_or(MetadataError::NoVideoStream)?;
+        .find(|s| s["codec_type"] == "video");
 
     let audio_stream = streams
         .iter()
@@ -46,30 +55,41 @@ pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError
 
     let format = &json["format"];
 
+    // Determine media type based on available streams
+    let has_video = video_stream.is_some();
+    let has_audio = audio_stream.is_some();
+
+    let media_type = if has_video && has_audio {
+        MediaType::Video
+    } else if has_audio {
+        MediaType::Audio
+    } else if has_video {
+        MediaType::Video  // Video-only (no audio track)
+    } else {
+        return Err(MetadataError::FFprobeError);  // No valid streams
+    };
+
     // Parse duration
     let duration = format["duration"]
         .as_str()
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
 
-    // Parse resolution
-    let width = video_stream["width"]
-        .as_u64()
-        .unwrap_or(0) as u32;
-    let height = video_stream["height"]
-        .as_u64()
-        .unwrap_or(0) as u32;
+    // Parse resolution (only for video files)
+    let resolution = video_stream.map(|vs| {
+        let width = vs["width"].as_u64().unwrap_or(0) as u32;
+        let height = vs["height"].as_u64().unwrap_or(0) as u32;
+        Resolution { width, height }
+    });
 
     // Parse codecs
-    let video_codec = video_stream["codec_name"]
-        .as_str()
-        .unwrap_or("unknown")
-        .to_string();
+    let video_codec = video_stream
+        .and_then(|s| s["codec_name"].as_str())
+        .map(|s| s.to_string());
 
     let audio_codec = audio_stream
         .and_then(|s| s["codec_name"].as_str())
-        .unwrap_or("none")
-        .to_string();
+        .map(|s| s.to_string());
 
     // Parse bitrate
     let bitrate = format["bit_rate"]
@@ -77,22 +97,23 @@ pub async fn extract_metadata(path: &Path) -> Result<FileMetadata, MetadataError
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
-    // Parse framerate
-    let framerate = video_stream["r_frame_rate"]
-        .as_str()
-        .map(parse_framerate)
-        .unwrap_or(30.0);
+    // Parse framerate (only for video files)
+    let framerate = video_stream
+        .and_then(|vs| vs["r_frame_rate"].as_str())
+        .map(parse_framerate);
 
     Ok(FileMetadata {
+        media_type,
         duration,
-        resolution: Resolution { width, height },
-        codec: VideoCodec {
+        resolution,
+        codec: MediaCodec {
             video: video_codec,
             audio: audio_codec,
         },
         bitrate,
         framerate,
-        has_audio: audio_stream.is_some(),
+        has_audio,
+        has_video,
     })
 }
 
