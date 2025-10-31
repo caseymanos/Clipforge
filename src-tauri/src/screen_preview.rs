@@ -40,10 +40,12 @@ impl ScreenPreviewGenerator {
     /// Generate a screen preview thumbnail for a given device ID
     ///
     /// Uses FFmpeg to capture a single frame from the screen device
+    /// device_type should be one of: "screen", "window", or "webcam"
     #[cfg(target_os = "macos")]
     pub async fn capture_screen_preview(
         &self,
         device_id: &str,
+        device_type: &str,
     ) -> Result<PathBuf, ThumbnailError> {
         let preview_filename = format!("screen-{}.jpg", device_id);
         let output_path = self.cache_dir.join(&preview_filename);
@@ -56,48 +58,73 @@ impl ScreenPreviewGenerator {
                 )
             ))?;
 
-        log::debug!("Capturing screen preview for device {}", device_id);
+        log::debug!("Capturing screen preview for device {} (type: {})", device_id, device_type);
 
-        // Determine if this is a camera device (numeric ID) or screen device (starts with "Capture screen")
-        let is_camera = device_id.parse::<u32>().is_ok();
+        // Determine if this is a webcam device based on passed device_type
+        let is_webcam = device_type == "webcam";
 
         // Format device name correctly for AVFoundation
-        // Cameras use numeric IDs, screens need "Capture screen {id}" format
-        let input_device = if is_camera {
+        // Webcams use numeric IDs directly, screens/windows need "Capture screen {index}" format
+        let input_device = if is_webcam {
             format!("{}:none", device_id)
         } else {
+            // For screens/windows, use the device ID directly (it's already the screen index)
             format!("Capture screen {}:none", device_id)
         };
 
-        // Build FFmpeg command - cameras need different parameters than screens
-        let mut cmd = Command::new(&self.ffmpeg_path);
-        cmd.arg("-f").arg("avfoundation");
-
-        if is_camera {
-            // For cameras: specify explicit framerate that most cameras support
-            cmd.arg("-framerate").arg("30");
-            cmd.arg("-t").arg("1");  // Capture for 1 second
+        // Build FFmpeg command - webcams need different parameters than screens
+        // Try multiple framerates for webcams since different models support different rates
+        let framerates = if is_webcam {
+            vec![60, 30, 15]  // Common webcam framerates
         } else {
-            // For screens: use short capture timeout
-            cmd.arg("-t").arg("0.1");
+            vec![30]  // Screens typically support 30fps
+        };
+
+        let mut last_error = String::new();
+        let mut success = false;
+
+        for framerate in framerates {
+            log::debug!("Trying framerate {}fps for device {}", framerate, device_id);
+            let mut cmd = Command::new(&self.ffmpeg_path);
+            cmd.arg("-f").arg("avfoundation");
+
+            if is_webcam {
+                // For cameras: specify explicit framerate and capture time
+                cmd.arg("-framerate").arg(framerate.to_string());
+                cmd.arg("-t").arg("1");  // Capture for 1 second
+            } else {
+                // For screens: use short capture timeout
+                cmd.arg("-t").arg("0.1");
+            }
+
+            cmd.arg("-i").arg(&input_device);
+            cmd.arg("-vframes").arg("1");
+            cmd.arg("-vf").arg("scale=320:-1");  // Width 320px, height auto
+            cmd.arg("-q:v").arg("2");             // High quality JPEG
+            cmd.arg("-y");                        // Overwrite if exists
+            cmd.arg(output_path_str);
+
+            let status = cmd.output().map_err(ThumbnailError::IoError)?;
+
+            if status.status.success() {
+                success = true;
+                log::info!("Screen preview generated at {}fps: {:?}", framerate, output_path);
+                break;
+            } else {
+                let stderr = String::from_utf8_lossy(&status.stderr);
+                last_error = stderr.to_string();
+                log::warn!("Preview capture failed at {}fps for device {} (type: {}). FFmpeg error: {}",
+                    framerate, device_id, device_type,
+                    last_error.lines().take(3).collect::<Vec<&str>>().join(" | "));
+            }
         }
 
-        cmd.arg("-i").arg(&input_device);
-        cmd.arg("-vframes").arg("1");
-        cmd.arg("-vf").arg("scale=320:-1");  // Width 320px, height auto
-        cmd.arg("-q:v").arg("2");             // High quality JPEG
-        cmd.arg("-y");                        // Overwrite if exists
-        cmd.arg(output_path_str);
-
-        let status = cmd.output().map_err(ThumbnailError::IoError)?;
-
-        if !status.status.success() {
-            let stderr = String::from_utf8_lossy(&status.stderr);
-            log::error!("FFmpeg screen preview failed for device {}: {}", device_id, stderr);
+        if !success {
+            log::error!("FFmpeg screen preview failed for device {} (type: {}) after trying all framerates. Input device: {}. Full error: {}",
+                device_id, device_type, input_device, last_error);
             return Err(ThumbnailError::GenerationFailed);
         }
 
-        log::info!("Screen preview generated: {:?}", output_path);
         Ok(output_path)
     }
 

@@ -361,12 +361,39 @@ pub enum SubtitleSource {
     Manual,
 }
 
+/// Subtitle styling options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubtitleStyle {
+    #[serde(default = "default_font_size")]
+    pub font_size: u32,        // Font size in pixels
+    #[serde(default = "default_font_name")]
+    pub font_name: String,     // Font family name
+    #[serde(default = "default_margin_v")]
+    pub margin_v: u32,         // Vertical margin from bottom (pixels)
+}
+
+fn default_font_size() -> u32 { 18 }
+fn default_font_name() -> String { "Arial".to_string() }
+fn default_margin_v() -> u32 { 20 }
+
+impl Default for SubtitleStyle {
+    fn default() -> Self {
+        Self {
+            font_size: 18,
+            font_name: "Arial".to_string(),
+            margin_v: 20,
+        }
+    }
+}
+
 /// Subtitle track for a timeline
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubtitleTrack {
     pub segments: Vec<SubtitleSegment>,
     pub language: String,      // ISO 639-1 code (e.g., "en", "es")
     pub source: SubtitleSource,
+    #[serde(default)]
+    pub style: SubtitleStyle,
 }
 
 /// Custom error types for subtitle operations

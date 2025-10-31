@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, createEventDispatcher } from 'svelte';
   import { open } from '@tauri-apps/plugin-dialog';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import {
@@ -16,9 +16,28 @@
     type MediaFile
   } from '../stores/mediaLibraryStore';
   import { addMediaFileToTimeline } from '../stores/timelineStore';
+  import RecordingStatusPopup from './RecordingStatusPopup.svelte';
+
+  // Props for recording functionality
+  export let isRecording = false;
+  export let showRecordingPopup = false;
+
+  const dispatch = createEventDispatcher();
 
   let searchQuery = '';
   let sortBy: 'name' | 'date' | 'duration' | 'size' = 'date';
+
+  function handleRecordClick() {
+    dispatch('recordClick');
+  }
+
+  function handlePopupMouseEnter() {
+    dispatch('popupMouseEnter');
+  }
+
+  function handlePopupMouseLeave() {
+    dispatch('popupMouseLeave');
+  }
 
   onMount(async () => {
     // Load media library on mount
@@ -79,8 +98,6 @@
       // Add file to timeline (default video track, at end)
       await addMediaFileToTimeline(file);
       console.log('✓ Added file to timeline:', file.filename);
-      // Temporary alert until we implement toast notifications
-      alert(`✓ Added "${file.filename}" to timeline!`);
     } catch (error) {
       console.error('✗ Failed to add file to timeline:', error);
       // Show error details to user
@@ -110,10 +127,7 @@
 
   async function handleDeleteClick(fileId: string, event: Event) {
     event.stopPropagation();
-
-    if (confirm('Are you sure you want to remove this file from the library?')) {
-      await deleteMediaFile(fileId);
-    }
+    await deleteMediaFile(fileId);
   }
 
   function getThumbnailUrl(file: MediaFile): string {
@@ -149,6 +163,26 @@
       <button on:click={handleImportClick} class="import-btn" disabled={$isLoadingLibrary}>
         {$isLoadingLibrary ? 'Importing...' : '+ Import Media'}
       </button>
+
+      <div
+        class="record-button-container"
+        on:mouseenter={handlePopupMouseEnter}
+        on:mouseleave={handlePopupMouseLeave}
+      >
+        <button
+          class="btn-record-screen"
+          class:recording={isRecording}
+          on:click={handleRecordClick}
+        >
+          <span class="record-icon">●</span>
+          {isRecording ? 'Recording...' : 'Record Screen'}
+        </button>
+        <RecordingStatusPopup
+          show={showRecordingPopup}
+          on:mouseenter={handlePopupMouseEnter}
+          on:mouseleave={handlePopupMouseLeave}
+        />
+      </div>
     </div>
   </div>
 
@@ -320,6 +354,65 @@
   .import-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .record-button-container {
+    position: relative;
+  }
+
+  .btn-record-screen {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: #e53e3e;
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .btn-record-screen:hover {
+    background: #c53030;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3);
+  }
+
+  .btn-record-screen.recording {
+    animation: flash-recording 1.5s ease-in-out infinite;
+  }
+
+  .btn-record-screen.recording .record-icon {
+    animation: pulse-fast 0.75s ease-in-out infinite;
+  }
+
+  .btn-record-screen .record-icon {
+    font-size: 1rem;
+  }
+
+  @keyframes flash-recording {
+    0%, 100% {
+      background: #e53e3e;
+      box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3);
+    }
+    50% {
+      background: #c53030;
+      box-shadow: 0 4px 20px rgba(229, 62, 62, 0.6);
+    }
+  }
+
+  @keyframes pulse-fast {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.6;
+      transform: scale(0.85);
+    }
   }
 
   .error-message {

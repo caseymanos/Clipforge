@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { subtitleStore, currentSubtitle, transcribeTimelineAudio, updateSubtitleSegment, deleteSubtitleSegment, toggleSubtitles, exportSubtitlesSRT, importSubtitlesSRT, setEditingSegment, setOpenAIApiKey, checkSubtitleAvailable } from '../stores/subtitleStore';
+  import { subtitleStore, currentSubtitle, transcribeTimelineAudio, updateSubtitleSegment, deleteSubtitleSegment, toggleSubtitles, exportSubtitlesSRT, importSubtitlesSRT, setEditingSegment, setOpenAIApiKey, checkSubtitleAvailable, updateSubtitleStyle } from '../stores/subtitleStore';
   import { timelineStore } from '../stores/timelineStore';
   import { mediaLibraryStore } from '../stores/mediaLibraryStore';
   import { playheadTime } from '../stores/timelineStore';
@@ -44,7 +44,7 @@
     }
 
     try {
-      await transcribeTimelineAudio(timeline.id, mediaFiles, selectedLanguage);
+      await transcribeTimelineAudio(timeline, mediaFiles, selectedLanguage);
     } catch (error) {
       alert(`Transcription failed: ${error}`);
     }
@@ -200,6 +200,25 @@
       </button>
     </div>
   </div>
+
+  {#if $subtitleStore.currentTrack}
+    <div class="style-section">
+      <h4>Subtitle Style</h4>
+      <div class="style-controls">
+        <label class="style-control">
+          <span class="style-label">Font Size: {$subtitleStore.currentTrack.style.font_size}px</span>
+          <input
+            type="range"
+            min="12"
+            max="48"
+            step="1"
+            value={$subtitleStore.currentTrack.style.font_size}
+            on:input={(e) => updateSubtitleStyle({ font_size: parseInt(e.currentTarget.value) })}
+          />
+        </label>
+      </div>
+    </div>
+  {/if}
 
   {#if $subtitleStore.isTranscribing && $subtitleStore.transcriptionProgress}
     <div class="progress">
@@ -456,5 +475,62 @@
     color: #aaa;
     text-align: center;
     padding: 2rem;
+  }
+
+  .style-section {
+    padding: 1rem;
+    background: #2a2a2a;
+    border-radius: 0.25rem;
+  }
+
+  .style-section h4 {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.95rem;
+    color: #e0e0e0;
+  }
+
+  .style-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .style-control {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .style-label {
+    font-size: 0.875rem;
+    color: #aaa;
+  }
+
+  .style-control input[type="range"] {
+    width: 100%;
+    height: 6px;
+    background: #444;
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+  }
+
+  .style-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #4a9eff;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .style-control input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #4a9eff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
   }
 </style>

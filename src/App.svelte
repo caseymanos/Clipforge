@@ -9,6 +9,7 @@
   import RecordingPanel from "./lib/components/RecordingPanel.svelte";
   import RecordingStatusPopup from "./lib/components/RecordingStatusPopup.svelte";
   import SubtitleEditor from "./lib/components/SubtitleEditor.svelte";
+  import HelpDialog from "./lib/components/HelpDialog.svelte";
   import { initializeTimeline, saveTimelineProject, loadTimelineProject } from "./lib/stores/timelineStore";
   import { isRecording } from "./lib/stores/recordingStore";
 
@@ -16,6 +17,7 @@
   let statusMessage = "";
   let exportDialog: ExportDialog;
   let recordingPanel: RecordingPanel;
+  let helpDialog: HelpDialog;
   let showRecordingPopup = false;
   let hidePopupTimeout: number | null = null;
 
@@ -45,6 +47,12 @@
     // Don't open panel if already recording
     if (!$isRecording && recordingPanel) {
       recordingPanel.open();
+    }
+  }
+
+  function handleHelp() {
+    if (helpDialog) {
+      helpDialog.open();
     }
   }
 
@@ -125,7 +133,7 @@
   }
 </script>
 
-<main class="container">
+<main class="container wide">
   <!-- App FPS Overlay -->
   <div class="app-fps-overlay">
     {appFps} FPS
@@ -140,60 +148,53 @@
           <p class="version">MVP</p>
         </div>
       </div>
-      <div
-        class="record-button-container"
-        on:mouseenter={handlePopupMouseEnter}
-        on:mouseleave={handlePopupMouseLeave}
-      >
-        <button
-          class="btn-record-screen"
-          class:recording={$isRecording}
-          on:click={handleRecord}
-        >
-          <span class="record-icon">●</span>
-          {$isRecording ? 'Recording...' : 'Record Screen'}
+      <div class="header-actions">
+        <button class="btn-save" on:click={handleSaveProject}>Save Project</button>
+        <button class="btn-load" on:click={handleLoadProject}>Load Project</button>
+        <button class="btn-help" on:click={handleHelp}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          Help
         </button>
-        <RecordingStatusPopup
-          show={showRecordingPopup}
-          on:mouseenter={handlePopupMouseEnter}
-          on:mouseleave={handlePopupMouseLeave}
-        />
       </div>
     </div>
   </header>
 
   <section class="media-library-section">
-    <MediaLibrary />
+    <MediaLibrary
+      on:recordClick={handleRecord}
+      isRecording={$isRecording}
+      showRecordingPopup={showRecordingPopup}
+      on:popupMouseEnter={handlePopupMouseEnter}
+      on:popupMouseLeave={handlePopupMouseLeave}
+    />
   </section>
 
   <section class="preview-section">
-    <h2>Video Preview</h2>
-    <p class="description">
-      Real-time preview window with frame-by-frame rendering. Scrub the timeline to see the preview update!
-    </p>
+    <!-- OPTION 3: Badge-Style Header with Indicators -->
+    <div class="preview-header-with-indicators">
+      <div class="preview-header-option3">
+        <div class="preview-title-badge">
+          <span class="live-badge">Video Preview</span>
+        </div>
+      </div>
+      <div class="preview-indicators-header" id="preview-indicators-target">
+        <!-- Indicators will be rendered here from VideoPreview component -->
+      </div>
+    </div>
+
     <VideoPreview />
   </section>
 
-  <section class="subtitle-section">
-    <h2>Subtitles & Transcription</h2>
-    <p class="description">
-      AI-powered subtitle generation using OpenAI Whisper. Transcribe your timeline audio, edit subtitles, and export to SRT format.
-    </p>
-    <SubtitleEditor />
-  </section>
-
   <section class="timeline-section">
-    <div class="timeline-header">
-      <div>
-        <h2>Timeline Editor</h2>
-        <p class="description">
-          Canvas-based timeline with Konva.js. Try dragging clips, resizing them, zooming with mouse wheel,
-          and dragging the playhead!
-        </p>
+    <div class="timeline-header-with-controls">
+      <div class="timeline-title-badge">
+        <span class="timeline-badge">Timeline Editor</span>
       </div>
       <div class="project-controls">
-        <button class="btn-save" on:click={handleSaveProject}>Save Project</button>
-        <button class="btn-load" on:click={handleLoadProject}>Load Project</button>
         <button class="btn-export" on:click={handleExport}>Export Video</button>
       </div>
     </div>
@@ -204,22 +205,14 @@
     <Timeline width={1200} height={400} />
   </section>
 
-
-  <section class="instructions">
-    <h3>How to Use</h3>
-    <ul>
-      <li><strong>Import videos:</strong> Click "Import Media" to add video files to your library</li>
-      <li><strong>Browse library:</strong> Search and sort your imported files</li>
-      <li><strong>Select files:</strong> Click on a file to select it, double-click to add to timeline (coming soon)</li>
-      <li><strong>Remove files:</strong> Hover over a file and click the trash icon to remove it</li>
-      <li><strong>Drag clips:</strong> Click and drag any clip on the timeline to move it</li>
-      <li><strong>Trim clips:</strong> Select a clip, then drag the white handles on the edges</li>
-      <li><strong>Zoom:</strong> Use mouse wheel to zoom in/out on the timeline</li>
-      <li><strong>Scroll:</strong> Hold Shift + mouse wheel to scroll horizontally</li>
-      <li><strong>Move playhead:</strong> Drag the red circle or click on the timeline</li>
-      <li><strong>Export video:</strong> Click "Export Video" to render timeline to MP4 with real-time progress</li>
-    </ul>
+  <section class="subtitle-section">
+    <h2>Subtitles & Transcription</h2>
+    <p class="description">
+      AI-powered subtitle generation using OpenAI Whisper. Transcribe your timeline audio, edit subtitles, and export to SRT format.
+    </p>
+    <SubtitleEditor />
   </section>
+
 
   <footer>
     <p>Built with Tauri + Svelte + Konva.js + Rust</p>
@@ -231,6 +224,7 @@
 
 <ExportDialog bind:this={exportDialog} />
 <RecordingPanel bind:this={recordingPanel} />
+<HelpDialog bind:this={helpDialog} />
 
 <style>
   :global(body) {
@@ -246,6 +240,12 @@
     max-width: 1400px;
     margin: 0 auto;
     padding: 2rem;
+  }
+
+  /* Wide layout - use full screen width */
+  .container.wide {
+    max-width: 100%;
+    padding: 2rem 3rem;
   }
 
   header {
@@ -268,7 +268,8 @@
   h1 {
     font-size: 3.5rem;
     margin: 0;
-    line-height: 1;
+    line-height: 1.2;
+    padding-bottom: 0.1rem;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -312,6 +313,146 @@
   h2 {
     font-size: 1.8rem;
     margin-bottom: 0.5rem;
+  }
+
+  /* OPTION 1: Inline Compact Header */
+  .preview-header-option1 {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .preview-title-compact {
+    font-size: 1.25rem;
+    margin: 0;
+    font-weight: 600;
+  }
+
+  .preview-meta {
+    color: #666;
+    font-size: 0.85rem;
+    font-weight: 400;
+  }
+
+  /* OPTION 2: Minimal Header with Icon Toggle */
+  .preview-header-option2 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    padding: 0.5rem 0;
+  }
+
+  .preview-title-with-icon {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .preview-title-with-icon svg {
+    color: #667eea;
+    flex-shrink: 0;
+  }
+
+  .preview-title-minimal {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .preview-status {
+    color: #48bb78;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* OPTION 3: Badge-Style Header */
+  .preview-header-with-indicators {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+
+  .preview-header-option3 {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .preview-title-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .preview-title-badge .title-text {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .live-badge {
+    display: inline-block;
+    padding: 0.375rem 0.75rem;
+    background: rgba(72, 187, 120, 0.15);
+    color: #48bb78;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 0.375rem;
+    border: 1px solid rgba(72, 187, 120, 0.3);
+  }
+
+  .preview-subtitle-micro {
+    color: #666;
+    font-size: 0.8rem;
+    margin-left: 0.125rem;
+  }
+
+  .preview-indicators-header {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  /* Preview indicators styles (global since they're rendered via innerHTML) */
+  :global(.preview-indicators-header .indicator) {
+    padding: 0.375rem 0.75rem;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 0.75rem;
+    font-family: monospace;
+    border-radius: 0.375rem;
+    backdrop-filter: blur(10px);
+    white-space: nowrap;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  :global(.preview-indicators-header .mode-indicator) {
+    background: rgba(102, 126, 234, 0.8);
+    font-weight: 600;
+  }
+
+  :global(.preview-indicators-header .mode-indicator.composite) {
+    background: rgba(234, 102, 126, 0.8);
+  }
+
+  :global(.preview-indicators-header .codec-indicator) {
+    background: rgba(52, 211, 153, 0.8);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  :global(.preview-indicators-header .file-indicator) {
+    font-size: 0.7rem;
+    background: rgba(0, 0, 0, 0.6);
   }
 
   h3 {
@@ -358,33 +499,6 @@
     line-height: 1.5;
   }
 
-  .instructions {
-    background: #1a1a1a;
-    padding: 2rem;
-    border-radius: 0.5rem;
-    border: 1px solid #2d2d2d;
-    margin-bottom: 3rem;
-  }
-
-  .instructions ul {
-    list-style: none;
-    padding: 0;
-    margin-top: 1rem;
-  }
-
-  .instructions li {
-    padding: 0.75rem 0;
-    border-bottom: 1px solid #2d2d2d;
-    color: #ccc;
-  }
-
-  .instructions li:last-child {
-    border-bottom: none;
-  }
-
-  .instructions strong {
-    color: #667eea;
-  }
 
   footer {
     text-align: center;
@@ -403,11 +517,30 @@
   }
 
   /* Timeline header with project controls */
-  .timeline-header {
+  .timeline-header-with-controls {
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: flex-start;
     margin-bottom: 1rem;
+  }
+
+  .timeline-title-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .timeline-badge {
+    display: inline-block;
+    padding: 0.375rem 0.75rem;
+    background: rgba(72, 187, 120, 0.15);
+    color: #48bb78;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 0.375rem;
+    border: 1px solid rgba(72, 187, 120, 0.3);
   }
 
   .project-controls {
@@ -460,6 +593,38 @@
     margin-bottom: 1rem;
     color: #aaa;
     font-size: 0.9rem;
+  }
+
+  /* Header actions */
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .btn-help {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: #2d2d2d;
+    color: #fff;
+    border: 1px solid #3d3d3d;
+    border-radius: 0.375rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .btn-help:hover {
+    background: #3d3d3d;
+    border-color: #667eea;
+    transform: translateY(-1px);
+  }
+
+  .btn-help svg {
+    flex-shrink: 0;
   }
 
   /* Media Library section header with record button */

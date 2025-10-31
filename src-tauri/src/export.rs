@@ -10,9 +10,10 @@ use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 use tauri::{Window, Emitter};
-use log::info;
+use log::{info, warn};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use uuid::Uuid;
 
 /// Export service for rendering timelines to video files
 pub struct ExportService {
@@ -54,8 +55,8 @@ impl ExportService {
         // Step 1: Validate timeline
         self.validate_timeline(timeline, media_files)?;
 
-        // Step 2: Build FFmpeg command
-        let ffmpeg_args = self.build_ffmpeg_command(
+        // Step 2: Build FFmpeg command (returns temp files to cleanup)
+        let (ffmpeg_args, temp_files) = self.build_ffmpeg_command(
             timeline,
             settings,
             &output_path,
@@ -63,9 +64,21 @@ impl ExportService {
         )?;
 
         // Step 3: Execute FFmpeg with progress tracking
-        self.execute_ffmpeg(ffmpeg_args, timeline.duration, window).await?;
+        let export_result = self.execute_ffmpeg(ffmpeg_args, timeline.duration, window).await;
 
-        // Step 4: Verify output file
+        // Step 4: Clean up temporary files (always, even if export failed)
+        for temp_file in &temp_files {
+            if let Err(e) = std::fs::remove_file(temp_file) {
+                warn!("Failed to cleanup temp file {:?}: {}", temp_file, e);
+            } else {
+                info!("Cleaned up temp file: {:?}", temp_file);
+            }
+        }
+
+        // Check export result after cleanup
+        export_result?;
+
+        // Step 5: Verify output file
         if !output_path.exists() {
             return Err(ExportError::OutputError("Output file was not created".to_string()));
         }
@@ -112,13 +125,14 @@ impl ExportService {
     }
 
     /// Build FFmpeg command with filter_complex
+    /// Returns (ffmpeg_args, temp_files_to_cleanup)
     fn build_ffmpeg_command(
         &self,
         timeline: &Timeline,
         settings: &ExportSettings,
         output_path: &Path,
         media_files: &HashMap<String, MediaFile>,
-    ) -> Result<Vec<String>, ExportError> {
+    ) -> Result<(Vec<String>, Vec<PathBuf>), ExportError> {
         let mut args = Vec::new();
 
         // Overwrite output file
@@ -148,8 +162,8 @@ impl ExportService {
             }
         }
 
-        // Build filter_complex for timeline
-        let filter_complex = self.build_filter_complex(timeline, &input_map, media_files)?;
+        // Build filter_complex for timeline (returns temp files to cleanup)
+        let (filter_complex, temp_files) = self.build_filter_complex(timeline, &input_map, media_files)?;
 
         info!("Generated filter_complex ({} bytes): {}", filter_complex.len(),
             if filter_complex.len() > 500 {
@@ -205,19 +219,21 @@ impl ExportService {
         // Output file
         args.push(output_path.to_string_lossy().to_string());
 
-        Ok(args)
+        Ok((args, temp_files))
     }
 
     /// Build filter_complex string for timeline
+    /// Returns (filter_complex, temp_files_to_cleanup)
     fn build_filter_complex(
         &self,
         timeline: &Timeline,
         input_map: &HashMap<String, usize>,
         _media_files: &HashMap<String, MediaFile>,
-    ) -> Result<String, ExportError> {
+    ) -> Result<(String, Vec<PathBuf>), ExportError> {
         let mut filters = Vec::new();
         let mut video_inputs = Vec::new();
         let mut audio_inputs = Vec::new();
+        let mut temp_files = Vec::new();
 
         // Count how many times each input is used for video and audio
         let mut video_usage_count: HashMap<usize, usize> = HashMap::new();
@@ -382,13 +398,13 @@ impl ExportService {
         // Concatenate all video inputs
         if !video_inputs.is_empty() {
             let video_label = if timeline.subtitle_enabled && timeline.subtitle_track.is_some() {
-                "[vconcat]" // Intermediate label for subtitle burning
+                "vconcat" // Intermediate label for subtitle burning
             } else {
-                "[outv]" // Final output if no subtitles
+                "outv" // Final output if no subtitles
             };
 
             let concat_filter = format!(
-                "{}concat=n={}:v=1:a=0{}",
+                "{}concat=n={}:v=1:a=0[{}]",
                 video_inputs.iter().map(|l| format!("[{}]", l)).collect::<Vec<_>>().join(""),
                 video_inputs.len(),
                 video_label
@@ -398,33 +414,49 @@ impl ExportService {
             // Add subtitle burning if enabled
             if timeline.subtitle_enabled {
                 if let Some(ref subtitle_track) = timeline.subtitle_track {
-                    // Generate SRT content
-                    let srt_content = self.generate_srt_content(subtitle_track)?;
+                    // Validate subtitle track has segments
+                    if subtitle_track.segments.is_empty() {
+                        warn!("Subtitle track is empty, skipping subtitle burning");
+                    } else {
+                        // Generate SRT content
+                        let srt_content = self.generate_srt_content(subtitle_track)?;
 
-                    // Create temporary SRT file path
-                    let temp_srt = std::env::temp_dir().join(format!("clipforge_subtitles_{}.srt",
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs()));
+                        // Create temporary SRT file path using UUID (avoids SystemTime panic)
+                        let temp_srt = std::env::temp_dir().join(format!("clipforge_subtitles_{}.srt", Uuid::new_v4()));
 
-                    // Write SRT file
-                    std::fs::write(&temp_srt, srt_content)
-                        .map_err(|e| ExportError::OutputError(format!("Failed to write SRT: {}", e)))?;
+                        // Write SRT file
+                        std::fs::write(&temp_srt, srt_content)
+                            .map_err(|e| ExportError::OutputError(format!("Failed to write SRT: {}", e)))?;
 
-                    // Add subtitles filter
-                    let subtitle_filter = format!(
-                        "[vconcat]subtitles={}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=1,MarginV=20'[outv]",
-                        temp_srt.to_string_lossy().replace("\\", "\\\\").replace(":", "\\:")
-                    );
-                    filters.push(subtitle_filter);
+                        // Add to cleanup list
+                        temp_files.push(temp_srt.clone());
 
-                    info!("Added subtitle burning filter with {} segments", subtitle_track.segments.len());
+                        // Normalize path for FFmpeg (use forward slashes on all platforms)
+                        let srt_path = temp_srt.to_string_lossy().replace("\\", "/");
+
+                        // Escape special characters for FFmpeg filter syntax
+                        let escaped_path = srt_path
+                            .replace(":", "\\:")
+                            .replace("'", "\\'");
+
+                        // Add subtitles filter using configurable style
+                        let style = &subtitle_track.style;
+                        let subtitle_filter = format!(
+                            "[vconcat]subtitles='{}':force_style='FontName={},FontSize={},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=1,MarginV={}'[outv]",
+                            escaped_path,
+                            style.font_name,
+                            style.font_size,
+                            style.margin_v
+                        );
+                        filters.push(subtitle_filter);
+
+                        info!("Added subtitle burning filter with {} segments ({}px font, temp file: {:?})", subtitle_track.segments.len(), style.font_size, temp_srt);
+                    }
                 }
             }
         }
 
-        // Concatenate all audio inputs
+        // Concatenate all audio inputs or create silent audio
         if !audio_inputs.is_empty() {
             let concat_filter = format!(
                 "{}concat=n={}:v=0:a=1[outa]",
@@ -432,9 +464,16 @@ impl ExportService {
                 audio_inputs.len()
             );
             filters.push(concat_filter);
+        } else {
+            // Generate silent audio if no audio inputs
+            filters.push(format!(
+                "anullsrc=channel_layout=stereo:sample_rate=48000:duration={}[outa]",
+                timeline.duration
+            ));
+            info!("No audio tracks found, generating silent audio");
         }
 
-        Ok(filters.join(";"))
+        Ok((filters.join(";"), temp_files))
     }
 
     /// Build effects filter string
@@ -500,10 +539,10 @@ impl ExportService {
 
     /// Format timestamp for SRT format
     fn format_srt_timestamp(&self, seconds: f64) -> String {
-        let hours = (seconds / 3600.0) as u32;
-        let minutes = ((seconds % 3600.0) / 60.0) as u32;
-        let secs = (seconds % 60.0) as u32;
-        let millis = ((seconds % 1.0) * 1000.0) as u32;
+        let hours = (seconds / 3600.0).floor() as u32;
+        let minutes = ((seconds % 3600.0) / 60.0).floor() as u32;
+        let secs = (seconds % 60.0).floor() as u32;
+        let millis = ((seconds % 1.0) * 1000.0).round() as u32;
 
         format!("{:02}:{:02}:{:02},{:03}", hours, minutes, secs, millis)
     }

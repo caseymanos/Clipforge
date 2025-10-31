@@ -1,8 +1,9 @@
-use crate::models::{MediaFile, SubtitleSegment, SubtitleTrack, Timeline};
+use crate::models::{MediaFile, SubtitleSegment, SubtitleTrack, Timeline, TrackType};
 use crate::subtitle::SubtitleService;
 use log::{info, error};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::collections::HashMap;
 use tauri::{State, Window};
 use tokio::sync::Mutex;
 
@@ -40,25 +41,47 @@ pub async fn check_subtitle_available(
 /// Transcribe timeline audio to generate subtitles
 #[tauri::command]
 pub async fn transcribe_timeline_audio(
-    timeline_id: String,
-    media_files: Vec<MediaFile>,
+    timeline: Timeline,
+    media_files: HashMap<String, MediaFile>,
     language: Option<String>,
     window: Window,
     state: State<'_, SubtitleServiceState>,
 ) -> Result<SubtitleTrack, String> {
-    info!("Transcribing timeline audio: {}", timeline_id);
+    info!("Transcribing timeline audio: {}", timeline.id);
 
     let service_lock = state.service.lock().await;
     let service = service_lock.as_ref()
         .ok_or_else(|| "Subtitle service not initialized. Please set API key first.".to_string())?;
 
-    // For now, transcribe the first media file with audio
-    // TODO: In future, merge all audio tracks
-    let media_file = media_files.iter()
-        .find(|f| f.codec.audio.is_some())
-        .ok_or_else(|| "No audio track found in timeline".to_string())?;
+    // Collect all audio clips from the timeline
+    let mut audio_clips = Vec::new();
 
-    let track = service.transcribe_media_file(media_file, language, Some(window))
+    for track in &timeline.tracks {
+        // Skip muted tracks
+        if track.muted {
+            continue;
+        }
+
+        // Get audio from video tracks and audio tracks
+        if matches!(track.track_type, TrackType::Video | TrackType::Audio) {
+            for clip in &track.clips {
+                // Get the media file for this clip
+                if let Some(media_file) = media_files.get(&clip.media_file_id) {
+                    // Only include clips that have audio
+                    if media_file.codec.audio.is_some() {
+                        audio_clips.push((clip.clone(), media_file.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    if audio_clips.is_empty() {
+        return Err("No audio clips found in timeline".to_string());
+    }
+
+    // Transcribe the timeline audio
+    let track = service.transcribe_timeline(&timeline, audio_clips, language, Some(window))
         .await
         .map_err(|e| format!("Transcription failed: {}", e))?;
 
@@ -129,5 +152,6 @@ pub async fn import_subtitles_srt(
         source: crate::models::SubtitleSource::Imported {
             file_path: path,
         },
+        style: Default::default(),
     })
 }

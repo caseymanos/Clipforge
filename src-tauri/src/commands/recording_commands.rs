@@ -183,6 +183,151 @@ pub async fn get_recording_duration(
     Ok(recorder.get_duration())
 }
 
+/// List available audio input devices (macOS only for now)
+/// Returns a list of (device_id, device_name) tuples
+#[tauri::command]
+pub async fn list_audio_devices() -> Result<Vec<(String, String)>, String> {
+    info!("Command: list_audio_devices");
+
+    #[cfg(target_os = "macos")]
+    {
+        use crate::recording::macos::MacOSRecorder;
+        use crate::ffmpeg_utils;
+
+        let ffmpeg_path = ffmpeg_utils::find_ffmpeg_path()
+            .map_err(|e| {
+                error!("Failed to find FFmpeg: {}", e);
+                e.to_string()
+            })?;
+
+        MacOSRecorder::get_audio_devices(&ffmpeg_path)
+            .map_err(|e| {
+                error!("Failed to list audio devices: {}", e);
+                e.to_string()
+            })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // For non-macOS platforms, return empty list for now
+        // TODO: Implement for Windows and Linux
+        warn!("Audio device listing not yet implemented for this platform");
+        Ok(Vec::new())
+    }
+}
+
+/// Check if a file exists at the given path
+#[tauri::command]
+pub fn file_exists(path: String) -> Result<bool, String> {
+    use std::path::Path;
+    Ok(Path::new(&path).exists())
+}
+
+/// Composite webcam overlay onto screen recording
+///
+/// Takes two separate video files (screen and webcam) and composites them
+/// using the provided overlay configuration. Returns the path to the composite video.
+#[tauri::command]
+pub async fn composite_webcam_recording(
+    app: AppHandle,
+    ffmpeg: State<'_, crate::ffmpeg::FFmpegService>,
+    screen_path: String,
+    webcam_path: String,
+    output_path: String,
+    overlay_config: crate::recording::WebcamOverlayConfig,
+) -> Result<String, String> {
+    use std::path::PathBuf;
+
+    info!("Command: composite_webcam_recording");
+    info!("  Screen: {}", screen_path);
+    info!("  Webcam: {}", webcam_path);
+    info!("  Output: {}", output_path);
+    info!("  Overlay config: {:?}", overlay_config);
+
+    let screen_path = PathBuf::from(&screen_path);
+    let webcam_path = PathBuf::from(&webcam_path);
+    let output_path = PathBuf::from(&output_path);
+
+    // Validate input files exist
+    if !screen_path.exists() {
+        let err_msg = format!("Screen recording file not found: {}", screen_path.display());
+        error!("{}", err_msg);
+        return Err(err_msg);
+    }
+    if !webcam_path.exists() {
+        let err_msg = format!("Webcam recording file not found: {}", webcam_path.display());
+        error!("{}", err_msg);
+        return Err(err_msg);
+    }
+
+    // Log file sizes for debugging
+    if let Ok(metadata) = std::fs::metadata(&screen_path) {
+        info!("  Screen file size: {} bytes", metadata.len());
+    }
+    if let Ok(metadata) = std::fs::metadata(&webcam_path) {
+        info!("  Webcam file size: {} bytes", metadata.len());
+    }
+
+    // Ensure output directory exists
+    if let Some(parent) = output_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            let err_msg = format!("Failed to create output directory: {}", e);
+            error!("{}", err_msg);
+            return Err(err_msg);
+        }
+    }
+
+    // Create progress callback that emits events
+    let app_clone = app.clone();
+    let progress_callback = Arc::new(move |progress: f64| {
+        let _ = app_clone.emit("compositing:progress", serde_json::json!({
+            "progress": progress
+        }));
+    });
+
+    // Perform compositing
+    info!("Starting FFmpeg composite operation...");
+    ffmpeg
+        .composite_webcam(
+            &screen_path,
+            &webcam_path,
+            &output_path,
+            &overlay_config,
+            Some(progress_callback),
+        )
+        .await
+        .map_err(|e| {
+            error!("FFmpeg composite operation failed: {}", e);
+            format!("Failed to composite webcam recording: {}", e)
+        })?;
+
+    // Validate output file was created
+    if !output_path.exists() {
+        let err_msg = format!("Composite file was not created: {}", output_path.display());
+        error!("{}", err_msg);
+        return Err(err_msg);
+    }
+
+    // Validate output file has content
+    if let Ok(metadata) = std::fs::metadata(&output_path) {
+        let file_size = metadata.len();
+        info!("  Composite file size: {} bytes", file_size);
+        if file_size == 0 {
+            let err_msg = format!("Composite file is empty: {}", output_path.display());
+            error!("{}", err_msg);
+            return Err(err_msg);
+        }
+    }
+
+    // Emit completion event
+    let _ = app.emit("compositing:complete", serde_json::json!({
+        "output_path": output_path.to_string_lossy().to_string()
+    }));
+
+    info!("Compositing complete: {}", output_path.display());
+    Ok(output_path.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

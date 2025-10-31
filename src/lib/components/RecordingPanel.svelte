@@ -14,6 +14,8 @@
     isIdle,
     isFinalizing,
     loadRecordingSources,
+    loadAudioDevices,
+    availableAudioDevices,
     checkRecordingPermissions,
     requestRecordingPermissions,
     startRecording,
@@ -27,11 +29,19 @@
     isWebcamMode,
     webcamSources,
     screenSources,
+    webcamOverlayConfig,
+    isCompositing,
+    compositingProgress,
+    compositeWebcamRecording,
     type AudioInputType,
     type CropRegion,
     type RecordingMode,
+    type WebcamPosition,
+    type WebcamShape,
   } from '../stores/recordingStore';
   import { importMediaFile } from '../stores/mediaLibraryStore';
+  import { addMediaFileToTimeline } from '../stores/timelineStore';
+  import { invoke } from '@tauri-apps/api/core';
   import CropEditor from './CropEditor.svelte';
 
   // Component state
@@ -56,7 +66,7 @@
 
   export function open() {
     showPanel = true;
-    initPanel();
+    // Sources already loaded from onMount - no need to reload
   }
 
   export function close() {
@@ -77,10 +87,14 @@
 
       if (!hasPerms) {
         showPermissionDialog = true;
-      } else {
-        // Load all sources initially
-        await loadRecordingSources('all');
+        return;
       }
+    }
+
+    // Always reload sources when panel opens to ensure fresh data
+    if ($hasPermissions) {
+      await loadRecordingSources('all');
+      await loadAudioDevices();
     }
   }
 
@@ -93,15 +107,6 @@
       // Show platform-specific instructions
       alert('Please grant screen recording permission in System Preferences > Privacy & Security > Screen Recording');
     }
-  }
-
-  // Reload sources when recording mode changes to get fresh preview thumbnails
-  // This prevents FFmpeg errors from trying to capture previews for the wrong device type
-  $: if (showPanel && permissionCheckDone && $hasPermissions && $recordingMode) {
-    const loadFilter = $recordingMode === 'ScreenOnly' ? 'screen'
-                     : $recordingMode === 'WebcamOnly' ? 'webcam'
-                     : 'all'; // ScreenAndWebcam needs both
-    loadRecordingSources(loadFilter);
   }
 
   function handleOpenCropEditor() {
@@ -135,14 +140,80 @@
   }
 
   async function handleStop() {
+    console.log('[RecordingPanel] handleStop called');
     const filePath = await stopRecording();
-    if (filePath) {
-      // Auto-import the recorded file to media library
+    console.log('[RecordingPanel] Recording stopped, filePath:', filePath);
+    console.log('[RecordingPanel] Current recordingMode:', $recordingMode);
+
+    if (filePath && $recordingMode === 'ScreenAndWebcam') {
+      console.log('[RecordingPanel] Dual mode detected - starting compositing workflow');
+
+      // Auto-composite the screen and webcam recordings
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+      const outputPath = filePath.replace('screen-', 'composite-');
+      const webcamPath = filePath.replace('screen-', 'webcam-');
+
+      console.log('[RecordingPanel] Paths calculated:');
+      console.log('  Screen:', filePath);
+      console.log('  Webcam:', webcamPath);
+      console.log('  Output:', outputPath);
+
+      try {
+        // Check if webcam file exists
+        console.log('[RecordingPanel] Checking if webcam file exists...');
+        const webcamExists = await invoke<boolean>('file_exists', { path: webcamPath });
+        console.log('[RecordingPanel] Webcam file exists:', webcamExists);
+
+        if (!webcamExists) {
+          throw new Error(`Webcam recording file not found: ${webcamPath}`);
+        }
+
+        console.log('[RecordingPanel] Starting compositing with config:', $webcamOverlayConfig);
+        const compositePath = await compositeWebcamRecording(
+          filePath,
+          webcamPath,
+          outputPath,
+          $webcamOverlayConfig
+        );
+        console.log('[RecordingPanel] Compositing complete:', compositePath);
+
+        if (compositePath) {
+          console.log('[RecordingPanel] Importing composite to media library');
+          const mediaFile = await importMediaFile(compositePath);
+          console.log('[RecordingPanel] Imported media file:', mediaFile);
+
+          if (mediaFile) {
+            console.log('[RecordingPanel] Adding to timeline');
+            await addMediaFileToTimeline(mediaFile);
+            alert(`Recording composited and added to timeline!`);
+          }
+        }
+      } catch (error) {
+        console.error('[RecordingPanel] Failed to composite webcam recording:', error);
+        console.error('[RecordingPanel] Error details:', error);
+
+        // Fall back to importing the screen recording only
+        console.log('[RecordingPanel] Falling back to screen-only import');
+        const mediaFile = await importMediaFile(filePath);
+        if (mediaFile) {
+          console.log('[RecordingPanel] Adding screen-only recording to timeline');
+          await addMediaFileToTimeline(mediaFile);
+          alert(`Recording saved and added to timeline (compositing failed: ${error.message || error})`);
+        }
+      }
+    } else if (filePath) {
+      // Auto-import the recorded file to media library (single source recording)
+      console.log('[RecordingPanel] Single source recording - importing to media library');
       const mediaFile = await importMediaFile(filePath);
+      console.log('[RecordingPanel] Imported media file:', mediaFile);
+
       if (mediaFile) {
-        alert(`Recording saved and imported to media library!`);
+        console.log('[RecordingPanel] Adding to timeline');
+        await addMediaFileToTimeline(mediaFile);
+        alert(`Recording saved and added to timeline!`);
       }
     } else if ($recordingError) {
+      console.error('[RecordingPanel] Recording error:', $recordingError);
       alert(`Failed to stop recording: ${$recordingError}`);
     }
   }
@@ -200,38 +271,40 @@
         <!-- Recording Controls -->
         <div class="recording-controls">
           {#if !$isRecording && !$isFinalizing}
-            <!-- Source Selection - Visual Grid -->
-            <div class="section">
-              <label>Recording Source</label>
-              <div class="sources-grid">
-                {#each $availableSources as source}
-                  <button
-                    class="source-card"
-                    class:selected={$selectedSource === source.id}
-                    on:click={() => selectedSource.set(source.id)}
-                    disabled={$isRecording}
-                  >
-                    {#if source.preview_path}
-                      <img
-                        src={convertFileSrc(source.preview_path)}
-                        alt={source.name}
-                        class="source-preview"
-                      />
-                    {:else}
-                      <div class="source-placeholder">
-                        {source.type === 'screen' ? '🖥️' : '🪟'}
-                      </div>
-                    {/if}
-                    <div class="source-info">
-                      <div class="source-name">{source.name}</div>
-                      {#if source.width && source.height}
-                        <div class="source-resolution">{source.width}×{source.height}</div>
+            <!-- Screen/Window Source Selection (shown for ScreenOnly and ScreenAndWebcam modes) -->
+            {#if $recordingMode === 'ScreenOnly' || $recordingMode === 'ScreenAndWebcam'}
+              <div class="section">
+                <label>Recording Source</label>
+                <div class="sources-grid">
+                  {#each $screenSources as source}
+                    <button
+                      class="source-card"
+                      class:selected={$selectedSource === source.id}
+                      on:click={() => selectedSource.set(source.id)}
+                      disabled={$isRecording}
+                    >
+                      {#if source.preview_path}
+                        <img
+                          src={convertFileSrc(source.preview_path)}
+                          alt={source.name}
+                          class="source-preview"
+                        />
+                      {:else}
+                        <div class="source-placeholder">
+                          {source.type === 'screen' ? '🖥️' : '🪟'}
+                        </div>
                       {/if}
-                    </div>
-                  </button>
-                {/each}
+                      <div class="source-info">
+                        <div class="source-name">{source.name}</div>
+                        {#if source.width && source.height}
+                          <div class="source-resolution">{source.width}×{source.height}</div>
+                        {/if}
+                      </div>
+                    </button>
+                  {/each}
+                </div>
               </div>
-            </div>
+            {/if}
 
             <!-- Recording Mode Selection -->
             <div class="section">
@@ -268,40 +341,135 @@
             </div>
 
             <!-- Webcam Selection (shown if webcam mode enabled) -->
-            {#if $isWebcamMode && $webcamSources.length > 0}
+            {#if $isWebcamMode}
               <div class="section">
                 <label class="section-label">Select Webcam</label>
-                <div class="sources-grid">
-                  {#each $webcamSources as webcam}
-                    <button
-                      class="source-card"
-                      class:selected={$selectedWebcam === webcam.id}
-                      on:click={() => selectedWebcam.set(webcam.id)}
-                      disabled={$isRecording}
-                    >
-                      {#if webcam.preview_path}
-                        <img
-                          src={convertFileSrc(webcam.preview_path)}
-                          alt={webcam.name}
-                          class="source-preview"
-                        />
-                      {:else}
-                        <div class="source-placeholder">
-                          <span class="placeholder-icon">📹</span>
+                {#if $webcamSources.length > 0}
+                  <div class="sources-grid">
+                    {#each $webcamSources as webcam}
+                      <button
+                        class="source-card"
+                        class:selected={$selectedWebcam === webcam.id}
+                        on:click={() => selectedWebcam.set(webcam.id)}
+                        disabled={$isRecording}
+                      >
+                        {#if webcam.preview_path}
+                          <img
+                            src={convertFileSrc(webcam.preview_path)}
+                            alt={webcam.name}
+                            class="source-preview"
+                          />
+                        {:else}
+                          <div class="source-placeholder">
+                            <span class="placeholder-icon">📹</span>
+                          </div>
+                        {/if}
+                        <div class="source-info">
+                          <div class="source-name">{webcam.name}</div>
                         </div>
-                      {/if}
-                      <div class="source-info">
-                        <div class="source-name">{webcam.name}</div>
-                      </div>
-                    </button>                  {/each}
-                </div>
+                      </button>
+                    {/each}
+                  </div>
+                {:else}
+                  <!-- Loading or no webcams found -->
+                  {#if $isLoadingSources}
+                    <div class="loading-section">
+                      <div class="spinner"></div>
+                      <p>Loading webcam sources...</p>
+                    </div>
+                  {:else}
+                    <div class="warning-message">
+                      No webcam detected. Please connect a camera to use webcam recording modes.
+                    </div>
+                  {/if}
+                {/if}
               </div>
             {/if}
 
-            <!-- Warning when no webcam detected -->
-            {#if $isWebcamMode && $webcamSources.length === 0}
-              <div class="warning-message">
-                ⚠️ No webcam detected. Please connect a camera to use webcam recording modes.
+            <!-- Webcam Overlay Settings (shown only for ScreenAndWebcam mode) -->
+            {#if $isDualMode}
+              <div class="section">
+                <label class="section-label">Webcam Overlay Settings</label>
+
+                <div class="overlay-settings">
+                  <div class="setting-group">
+                    <label class="setting-label">Position</label>
+                    <div class="position-grid">
+                      <button
+                        class="position-btn"
+                        class:selected={$webcamOverlayConfig.position === 'TopLeft'}
+                        on:click={() => webcamOverlayConfig.update(c => ({...c, position: 'TopLeft'}))}
+                        disabled={$isRecording}
+                        title="Top Left"
+                      >
+                        <span class="position-icon">↖</span>
+                      </button>
+                      <button
+                        class="position-btn"
+                        class:selected={$webcamOverlayConfig.position === 'TopRight'}
+                        on:click={() => webcamOverlayConfig.update(c => ({...c, position: 'TopRight'}))}
+                        disabled={$isRecording}
+                        title="Top Right"
+                      >
+                        <span class="position-icon">↗</span>
+                      </button>
+                      <button
+                        class="position-btn"
+                        class:selected={$webcamOverlayConfig.position === 'BottomLeft'}
+                        on:click={() => webcamOverlayConfig.update(c => ({...c, position: 'BottomLeft'}))}
+                        disabled={$isRecording}
+                        title="Bottom Left"
+                      >
+                        <span class="position-icon">↙</span>
+                      </button>
+                      <button
+                        class="position-btn"
+                        class:selected={$webcamOverlayConfig.position === 'BottomRight'}
+                        on:click={() => webcamOverlayConfig.update(c => ({...c, position: 'BottomRight'}))}
+                        disabled={$isRecording}
+                        title="Bottom Right"
+                      >
+                        <span class="position-icon">↘</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="setting-group">
+                    <label class="setting-label">Shape</label>
+                    <div class="shape-buttons">
+                      <button
+                        class="shape-btn"
+                        class:selected={$webcamOverlayConfig.shape === 'Square'}
+                        on:click={() => webcamOverlayConfig.update(c => ({...c, shape: 'Square'}))}
+                        disabled={$isRecording}
+                      >
+                        <span class="shape-icon">⬜</span>
+                        <span>Square</span>
+                      </button>
+                      <button
+                        class="shape-btn"
+                        class:selected={$webcamOverlayConfig.shape === 'Circle'}
+                        on:click={() => webcamOverlayConfig.update(c => ({...c, shape: 'Circle'}))}
+                        disabled={$isRecording}
+                      >
+                        <span class="shape-icon">⭕</span>
+                        <span>Circle</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="setting-group">
+                    <label class="setting-label">Size: {$webcamOverlayConfig.size}px</label>
+                    <input
+                      type="range"
+                      min="200"
+                      max="600"
+                      bind:value={$webcamOverlayConfig.size}
+                      disabled={$isRecording}
+                      class="size-slider"
+                    />
+                  </div>
+                </div>
               </div>
             {/if}
 
@@ -319,6 +487,23 @@
                 {/each}
               </select>
             </div>
+
+            <!-- Microphone Device Selector (only show when Microphone or Both is selected) -->
+            {#if ($recordingConfig.audio_input === 'Microphone' || $recordingConfig.audio_input === 'Both') && $availableAudioDevices.length > 0}
+              <div class="section">
+                <label for="microphone-select">Microphone Device</label>
+                <select
+                  id="microphone-select"
+                  value={$recordingConfig.audio_device_id || $availableAudioDevices[0]?.id}
+                  on:change={(e) => updateConfig('audio_device_id', e.currentTarget.value)}
+                  disabled={$isRecording}
+                >
+                  {#each $availableAudioDevices as device}
+                    <option value={device.id}>{device.name}</option>
+                  {/each}
+                </select>
+              </div>
+            {/if}
 
             <!-- Quality Settings -->
             <div class="section">
@@ -1031,5 +1216,162 @@
   /* Placeholder Icon */
   .placeholder-icon {
     font-size: 2.5rem;
+  }
+
+  /* Webcam Overlay Settings */
+  .overlay-settings {
+    background: #2d2d2d;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-top: 0.75rem;
+  }
+
+  .setting-group {
+    margin-bottom: 1rem;
+  }
+
+  .setting-group:last-child {
+    margin-bottom: 0;
+  }
+
+  .setting-label {
+    display: block;
+    color: #aaa;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .position-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .position-btn {
+    padding: 1rem;
+    background: #1a1a1a;
+    color: #fff;
+    border: 2px solid #3d3d3d;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1.5rem;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .position-btn:hover:not(:disabled) {
+    background: #3d3d3d;
+    border-color: #667eea;
+  }
+
+  .position-btn.selected {
+    background: #667eea;
+    border-color: #667eea;
+  }
+
+  .position-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .position-icon {
+    font-size: 2rem;
+  }
+
+  .shape-buttons {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .shape-btn {
+    flex: 1;
+    padding: 0.75rem;
+    background: #1a1a1a;
+    color: #fff;
+    border: 2px solid #3d3d3d;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+  }
+
+  .shape-btn:hover:not(:disabled) {
+    background: #3d3d3d;
+    border-color: #667eea;
+  }
+
+  .shape-btn.selected {
+    background: #667eea;
+    border-color: #667eea;
+  }
+
+  .shape-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .shape-icon {
+    font-size: 1.2rem;
+  }
+
+  .size-slider {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #3d3d3d;
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .size-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: #667eea;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .size-slider::-webkit-slider-thumb:hover {
+    background: #5568d3;
+    transform: scale(1.1);
+  }
+
+  .size-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: #667eea;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .size-slider::-moz-range-thumb:hover {
+    background: #5568d3;
+    transform: scale(1.1);
+  }
+
+  .size-slider:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .size-slider:disabled::-webkit-slider-thumb {
+    cursor: not-allowed;
+  }
+
+  .size-slider:disabled::-moz-range-thumb {
+    cursor: not-allowed;
   }
 </style>

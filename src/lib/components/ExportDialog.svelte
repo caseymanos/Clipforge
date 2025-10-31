@@ -5,6 +5,7 @@
   import { save } from '@tauri-apps/plugin-dialog';
   import { timelineStore } from '../stores/timelineStore';
   import { mediaLibraryStore } from '../stores/mediaLibraryStore';
+  import { subtitleStore } from '../stores/subtitleStore';
 
   // Export preset types
   interface ExportSettings {
@@ -83,7 +84,20 @@
       exporting = true;
       progress = { percentage: 0, current_frame: 0, fps: 0, time_remaining_secs: 0 };
 
-      const timeline = $timelineStore;
+      // Get timeline and merge subtitle data
+      const timeline = {
+        ...$timelineStore,
+        subtitle_track: $subtitleStore.currentTrack,
+        subtitle_enabled: $subtitleStore.enabled
+      };
+
+      // Debug: Log subtitle state
+      console.log('Export subtitle data:', {
+        enabled: $subtitleStore.enabled,
+        hasTrack: !!$subtitleStore.currentTrack,
+        segmentCount: $subtitleStore.currentTrack?.segments?.length || 0
+      });
+
       const settings = presets[selectedPreset][1];
 
       // Build media files map from media library store
