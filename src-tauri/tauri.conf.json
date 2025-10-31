@@ -19,11 +19,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/ffprobe"
+    ],
     "category": "Video",
     "shortDescription": "Desktop video editor",
     "longDescription": "A modern, performant desktop video editor built with Tauri and Rust",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "entitlements": "entitlements.plist"
     },
     "windows": {
       "digestAlgorithm": "sha256"

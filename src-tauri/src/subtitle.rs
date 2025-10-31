@@ -1,4 +1,5 @@
-use crate::models::{MediaFile, SubtitleSegment, SubtitleSource, SubtitleTrack, SubtitleError};
+use crate::models::{MediaFile, SubtitleSegment, SubtitleSource, SubtitleTrack, SubtitleError, Timeline, Clip};
+use crate::ffmpeg_utils;
 use log::{info, warn, error};
 use reqwest::multipart;
 use serde::{Deserialize, Serialize};
@@ -147,6 +148,192 @@ impl SubtitleService {
 
         info!("Transcription complete: {} segments", track.segments.len());
         Ok(track)
+    }
+
+    /// Transcribe timeline audio by extracting and merging all audio clips
+    pub async fn transcribe_timeline(
+        &self,
+        timeline: &Timeline,
+        audio_clips: Vec<(Clip, MediaFile)>,
+        language: Option<String>,
+        window: Option<Window>,
+    ) -> Result<SubtitleTrack, SubtitleError> {
+        info!("Starting timeline transcription with {} audio clips", audio_clips.len());
+
+        // Emit progress: Starting
+        if let Some(ref win) = window {
+            let _ = win.emit("subtitle:progress", SubtitleProgress {
+                stage: "Extracting timeline audio".to_string(),
+                progress: 0.1,
+            });
+        }
+
+        // Extract timeline audio to temporary file
+        let timeline_audio_path = self.extract_timeline_audio(&audio_clips, window.as_ref()).await?;
+
+        // Call OpenAI Whisper API
+        if let Some(ref win) = window {
+            let _ = win.emit("subtitle:progress", SubtitleProgress {
+                stage: "Transcribing with OpenAI Whisper".to_string(),
+                progress: 0.5,
+            });
+        }
+
+        let segments = self.call_whisper_api(&timeline_audio_path, language.clone()).await?;
+
+        // Clean up temporary timeline audio file
+        let _ = fs::remove_file(&timeline_audio_path);
+
+        // Create subtitle track
+        let lang = language.as_deref().unwrap_or("en");
+        let track = SubtitleTrack {
+            segments,
+            language: lang.to_string(),
+            source: SubtitleSource::Transcribed {
+                media_file_id: timeline.id.clone(),
+                provider: "openai-whisper".to_string(),
+            },
+            style: Default::default(),
+        };
+
+        if let Some(ref win) = window {
+            let _ = win.emit("subtitle:progress", SubtitleProgress {
+                stage: "Complete".to_string(),
+                progress: 1.0,
+            });
+        }
+
+        info!("Timeline transcription complete: {} segments", track.segments.len());
+        Ok(track)
+    }
+
+    /// Extract and merge audio from timeline clips
+    async fn extract_timeline_audio(
+        &self,
+        audio_clips: &[(Clip, MediaFile)],
+        window: Option<&Window>,
+    ) -> Result<PathBuf, SubtitleError> {
+        let temp_dir = std::env::temp_dir();
+        let output_path = temp_dir.join(format!("clipforge_timeline_audio_{}.mp3", uuid::Uuid::new_v4()));
+
+        info!("Extracting timeline audio to: {:?}", output_path);
+
+        // Sort clips by timeline position
+        let mut sorted_clips: Vec<_> = audio_clips.iter().collect();
+        sorted_clips.sort_by(|a, b| a.0.track_position.partial_cmp(&b.0.track_position).unwrap());
+
+        // Build FFmpeg concat filter
+        // For simple timeline with non-overlapping clips, we can use concat demuxer
+        // For now, let's extract each clip's audio and concat them
+
+        let mut temp_files = Vec::new();
+        let mut filter_inputs = Vec::new();
+
+        for (idx, (clip, media_file)) in sorted_clips.iter().enumerate() {
+            if let Some(ref win) = window {
+                let progress = 0.1 + (0.3 * (idx as f64 / sorted_clips.len() as f64));
+                let _ = win.emit("subtitle:progress", SubtitleProgress {
+                    stage: format!("Extracting clip {}/{}", idx + 1, sorted_clips.len()),
+                    progress,
+                });
+            }
+
+            // Extract this clip's audio segment
+            let clip_audio_path = temp_dir.join(format!("clipforge_clip_audio_{}_{}.mp3", uuid::Uuid::new_v4(), idx));
+
+            // Calculate duration from trim points
+            let duration = clip.trim_end - clip.trim_start;
+
+            info!(
+                "Extracting audio from clip {}: start={}, duration={}, file={:?}",
+                idx, clip.trim_start, duration, media_file.path
+            );
+
+            let ffmpeg_path = ffmpeg_utils::find_ffmpeg_path()
+                .map_err(|e| SubtitleError::CacheError(e))?;
+            let output = tokio::process::Command::new(&ffmpeg_path)
+                .arg("-y")
+                .arg("-ss")
+                .arg(clip.trim_start.to_string())
+                .arg("-t")
+                .arg(duration.to_string())
+                .arg("-i")
+                .arg(&media_file.path)
+                .arg("-vn")  // No video
+                .arg("-ar")
+                .arg("16000")  // 16kHz sample rate (Whisper recommended)
+                .arg("-ac")
+                .arg("1")  // Mono
+                .arg("-b:a")
+                .arg("64k")
+                .arg(&clip_audio_path)
+                .output()
+                .await
+                .map_err(|e| SubtitleError::IoError(e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!("FFmpeg failed to extract clip audio: {}", stderr);
+                // Clean up temp files
+                for temp_file in &temp_files {
+                    let _ = fs::remove_file(temp_file);
+                }
+                return Err(SubtitleError::CacheError(format!("Failed to extract clip audio: {}", stderr)));
+            }
+
+            temp_files.push(clip_audio_path.clone());
+            filter_inputs.push(format!("[{}:a]", idx));
+        }
+
+        // Now concat all audio clips
+        if let Some(ref win) = window {
+            let _ = win.emit("subtitle:progress", SubtitleProgress {
+                stage: "Merging audio clips".to_string(),
+                progress: 0.4,
+            });
+        }
+
+        info!("Concatenating {} audio clips", temp_files.len());
+
+        // Build FFmpeg command to concat all clips
+        let ffmpeg_path = ffmpeg_utils::find_ffmpeg_path()
+            .map_err(|e| SubtitleError::CacheError(e))?;
+        let mut cmd = tokio::process::Command::new(&ffmpeg_path);
+        cmd.arg("-y");
+
+        // Add all input files
+        for temp_file in &temp_files {
+            cmd.arg("-i").arg(temp_file);
+        }
+
+        // Build concat filter
+        let concat_filter = format!("{}concat=n={}:v=0:a=1[outa]",
+            filter_inputs.join(""),
+            temp_files.len()
+        );
+
+        cmd.arg("-filter_complex")
+            .arg(&concat_filter)
+            .arg("-map")
+            .arg("[outa]")
+            .arg(&output_path);
+
+        let output = cmd.output()
+            .await
+            .map_err(|e| SubtitleError::IoError(e))?;
+
+        // Clean up temp clip files
+        for temp_file in &temp_files {
+            let _ = fs::remove_file(temp_file);
+        }
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            error!("FFmpeg failed to concat audio: {}", stderr);
+            return Err(SubtitleError::CacheError(format!("Failed to concat timeline audio: {}", stderr)));
+        }
+
+        Ok(output_path)
     }
 
     /// Extract audio from video file using FFmpeg

@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { videoDir } from '@tauri-apps/api/path';
@@ -42,6 +42,7 @@ export interface RecordingConfig {
     recording_mode?: RecordingMode;
     webcam_source?: RecordingSource;
     webcam_output_path?: string;
+    webcam_overlay_config?: WebcamOverlayConfig;
 }
 
 export interface RecordingState {
@@ -49,6 +50,17 @@ export interface RecordingState {
     duration: number;
     output_path: string | null;
     error_message: string | null;
+}
+
+// Webcam overlay types
+export type WebcamPosition = 'TopLeft' | 'TopRight' | 'BottomLeft' | 'BottomRight';
+export type WebcamShape = 'Square' | 'Circle';
+
+export interface WebcamOverlayConfig {
+    position: WebcamPosition;
+    shape: WebcamShape;
+    size: number;
+    margin: number;
 }
 
 // Store state
@@ -77,6 +89,21 @@ export const recordingError = writable<string | null>(null);
 export const recordingMode = writable<RecordingMode>('ScreenOnly');
 export const selectedWebcam = writable<string | null>(null);
 
+// Webcam overlay configuration store
+export const webcamOverlayConfig = writable<WebcamOverlayConfig>({
+    position: 'BottomRight',
+    shape: 'Square',  // Changed from Circle to Square to avoid FFmpeg filter parsing issues
+    size: 320,
+    margin: 20,
+});
+
+// Compositing progress tracking
+export const isCompositing = writable<boolean>(false);
+export const compositingProgress = writable<number>(0);
+
+// Track webcam output path during recording (for auto-compositing)
+export const currentWebcamPath = writable<string | null>(null);
+
 // Derived stores
 export const isRecording = derived(recordingState, $state => $state.state === 'Recording');
 export const isPaused = derived(recordingState, $state => $state.state === 'Paused');
@@ -103,6 +130,9 @@ let unlistenStopped: UnlistenFn | null = null;
  * Initialize event listeners for recording updates
  */
 export async function initializeRecordingListeners() {
+    // Clean up any existing listeners first to prevent duplicates
+    cleanupRecordingListeners();
+
     // Listen for recording started event
     unlistenStarted = await listen<void>('recording:started', () => {
         console.log('Recording started');
@@ -188,21 +218,26 @@ export type SourceTypeFilter = 'screen' | 'webcam' | 'window' | 'all';
  * @param filter - Filter type: 'screen', 'webcam', 'window', or 'all' (default: 'all')
  */
 export async function loadRecordingSources(filter: SourceTypeFilter = 'all'): Promise<void> {
+    console.log('[loadRecordingSources] Starting load with filter:', filter);
     isLoadingSources.set(true);
     recordingError.set(null);
 
     try {
+        console.log('[loadRecordingSources] Calling backend list_recording_sources...');
         const sources = await invoke<RecordingSource[]>('list_recording_sources', { filter });
+        console.log('[loadRecordingSources] Received', sources.length, 'sources:', sources);
         availableSources.set(sources);
 
         // Auto-select first source if none selected
         if (sources.length > 0) {
             selectedSource.update(current => current || sources[0].id);
         }
+        console.log('[loadRecordingSources] Load completed successfully');
     } catch (error) {
-        console.error('Failed to load recording sources:', error);
+        console.error('[loadRecordingSources] Failed to load recording sources:', error);
         recordingError.set(error as string);
     } finally {
+        console.log('[loadRecordingSources] Setting isLoadingSources to false');
         isLoadingSources.set(false);
     }
 }
@@ -222,33 +257,40 @@ export async function loadWebcamSources(): Promise<void> {
 }
 
 /**
+ * Load available audio input devices (microphones)
+ */
+export async function loadAudioDevices(): Promise<void> {
+    console.log('[loadAudioDevices] Loading audio devices...');
+    recordingError.set(null);
+
+    try {
+        const devices = await invoke<[string, string][]>('list_audio_devices');
+        console.log('[loadAudioDevices] Received', devices.length, 'audio devices:', devices);
+
+        // Convert tuples to AudioDevice objects
+        const audioDevices: AudioDevice[] = devices.map(([id, name]) => ({ id, name }));
+        availableAudioDevices.set(audioDevices);
+
+        console.log('[loadAudioDevices] Load completed successfully');
+    } catch (error) {
+        console.error('[loadAudioDevices] Failed to load audio devices:', error);
+        recordingError.set(error as string);
+        // Set empty array on error
+        availableAudioDevices.set([]);
+    }
+}
+
+/**
  * Start recording with the current configuration
  */
 export async function startRecording(): Promise<boolean> {
     recordingError.set(null);
 
     try {
-        // Get current values from stores
-        const sourceId = await new Promise<string | null>(resolve => {
-            const unsubscribe = selectedSource.subscribe(value => {
-                resolve(value);
-                unsubscribe();
-            });
-        });
-
-        const sources = await new Promise<RecordingSource[]>(resolve => {
-            const unsubscribe = availableSources.subscribe(value => {
-                resolve(value);
-                unsubscribe();
-            });
-        });
-
-        const config = await new Promise<Partial<RecordingConfig>>(resolve => {
-            const unsubscribe = recordingConfig.subscribe(value => {
-                resolve(value);
-                unsubscribe();
-            });
-        });
+        // Get current values from stores using get() to avoid closure bugs
+        const sourceId = get(selectedSource);
+        const sources = get(availableSources);
+        const config = get(recordingConfig);
 
         if (!sourceId) {
             recordingError.set('No recording source selected');
@@ -263,19 +305,8 @@ export async function startRecording(): Promise<boolean> {
         }
 
         // Get recording mode and webcam selection
-        const mode = await new Promise<RecordingMode>(resolve => {
-            const unsubscribe = recordingMode.subscribe(value => {
-                resolve(value);
-                unsubscribe();
-            });
-        });
-
-        const webcamId = await new Promise<string | null>(resolve => {
-            const unsubscribe = selectedWebcam.subscribe(value => {
-                resolve(value);
-                unsubscribe();
-            });
-        });
+        const mode = get(recordingMode);
+        const webcamId = get(selectedWebcam);
 
         // Validate mode-specific requirements
         if ((mode === 'WebcamOnly' || mode === 'ScreenAndWebcam') && !webcamId) {
@@ -297,6 +328,13 @@ export async function startRecording(): Promise<boolean> {
             'Ultra': 9
         };
         const qualityValue = qualityMap[config.quality as keyof typeof qualityMap] || 7;
+
+        // Log audio configuration for debugging
+        console.log('[AUDIO] Recording audio config:', {
+            audio_input: config.audio_input || 'None',
+            audio_device_id: config.audio_device_id,
+            recording_mode: mode
+        });
 
         // Get webcam source object if needed
         let webcamSource: RecordingSource | undefined;
@@ -320,6 +358,14 @@ export async function startRecording(): Promise<boolean> {
             webcam_source: webcamSource,
             webcam_output_path: (mode === 'ScreenAndWebcam') ? webcamPath : undefined,
         };
+
+        // Store webcam path for auto-compositing when in dual mode
+        if (mode === 'ScreenAndWebcam') {
+            currentWebcamPath.set(webcamPath);
+            console.log('[startRecording] Stored webcam path for auto-compositing:', webcamPath);
+        } else {
+            currentWebcamPath.set(null);
+        }
 
         await invoke('start_recording', {
             source: source,
@@ -349,6 +395,7 @@ export async function startRecording(): Promise<boolean> {
 
 /**
  * Stop the current recording
+ * If webcam was recorded in dual mode, automatically composites them
  */
 export async function stopRecording(): Promise<string | null> {
     recordingError.set(null);
@@ -359,19 +406,95 @@ export async function stopRecording(): Promise<string | null> {
             state: 'Finalizing',
         }));
 
-        const filePath = await invoke<string>('stop_recording');
+        const screenPath = await invoke<string>('stop_recording');
+        console.log('[stopRecording] Screen recording saved to:', screenPath);
+
+        // Check if we need to auto-composite webcam overlay
+        const webcamPath = get(currentWebcamPath);
+        const mode = get(recordingMode);
+
+        if (mode === 'ScreenAndWebcam' && webcamPath) {
+            console.log('[stopRecording] Dual mode detected, auto-compositing webcam overlay...');
+            console.log('[stopRecording] Screen path:', screenPath);
+            console.log('[stopRecording] Webcam path:', webcamPath);
+
+            // Generate composite output path
+            const videoDirPath = await videoDir();
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+            const compositePath = `${videoDirPath}/ClipForge/composite-${timestamp}.mp4`;
+
+            // Get webcam overlay config
+            const overlayConfig = get(webcamOverlayConfig);
+
+            // Composite the videos
+            const compositeResult = await compositeWebcamRecording(
+                screenPath,
+                webcamPath,
+                compositePath,
+                overlayConfig
+            );
+
+            if (compositeResult) {
+                console.log('[stopRecording] Compositing successful:', compositeResult);
+
+                // Clear webcam path
+                currentWebcamPath.set(null);
+
+                recordingState.update(state => ({
+                    ...state,
+                    state: 'Idle',
+                    output_path: compositeResult, // Return composite path instead of screen path
+                    duration: 0,
+                }));
+
+                return compositeResult;
+            } else {
+                // Compositing failed - check if source files still exist
+                const screenExists = await invoke<boolean>('file_exists', { path: screenPath });
+                const webcamExists = await invoke<boolean>('file_exists', { path: webcamPath });
+
+                console.error('[stopRecording] Compositing failed!');
+                console.error('  Screen file exists:', screenExists);
+                console.error('  Webcam file exists:', webcamExists);
+
+                const errorMsg = 'Failed to composite screen and webcam recordings. ' +
+                    (screenExists ? 'Screen recording saved separately.' : 'Source files may have been lost.');
+                recordingError.set(errorMsg);
+
+                if (screenExists) {
+                    // Return screen recording if it still exists
+                    console.log('[stopRecording] Returning screen recording as fallback');
+                    currentWebcamPath.set(null);
+                    recordingState.update(state => ({
+                        ...state,
+                        state: 'Idle',
+                        output_path: screenPath,
+                        duration: 0,
+                        error_message: errorMsg,
+                    }));
+                    return screenPath;
+                } else {
+                    // Both files lost
+                    throw new Error('Compositing failed and source recordings were lost');
+                }
+            }
+        }
+
+        // Clear webcam path
+        currentWebcamPath.set(null);
 
         recordingState.update(state => ({
             ...state,
             state: 'Idle',
-            output_path: filePath,
+            output_path: screenPath,
             duration: 0,
         }));
 
-        return filePath;
+        return screenPath;
     } catch (error) {
         console.error('Failed to stop recording:', error);
         recordingError.set(error as string);
+        currentWebcamPath.set(null); // Clear on error
         recordingState.update(state => ({
             ...state,
             state: 'Error',
@@ -426,4 +549,79 @@ export function resetRecordingState(): void {
         error_message: null,
     });
     recordingError.set(null);
+}
+
+/**
+ * Composite webcam overlay onto screen recording
+ *
+ * @param screenPath - Path to screen recording file
+ * @param webcamPath - Path to webcam recording file
+ * @param outputPath - Path where composite video should be saved
+ * @param overlayConfig - Webcam overlay configuration
+ * @returns Path to the composite video file
+ */
+export async function compositeWebcamRecording(
+    screenPath: string,
+    webcamPath: string,
+    outputPath: string,
+    overlayConfig: WebcamOverlayConfig
+): Promise<string | null> {
+    console.log('[compositeWebcamRecording] Starting compositing...');
+    isCompositing.set(true);
+    compositingProgress.set(0);
+    recordingError.set(null);
+
+    // Set up progress listener
+    const unlistenProgress = await listen<{ progress: number }>('compositing:progress', (event) => {
+        compositingProgress.set(event.payload.progress);
+        console.log('[compositeWebcamRecording] Progress:', event.payload.progress);
+    });
+
+    // Set up completion listener
+    const unlistenComplete = await listen<{ output_path: string }>('compositing:complete', (event) => {
+        console.log('[compositeWebcamRecording] Complete:', event.payload.output_path);
+        isCompositing.set(false);
+        compositingProgress.set(100);
+    });
+
+    try {
+        console.log('[compositeWebcamRecording] Invoking backend composite command...');
+        const result = await invoke<string>('composite_webcam_recording', {
+            screenPath,
+            webcamPath,
+            outputPath,
+            overlayConfig,
+        });
+
+        console.log('[compositeWebcamRecording] Compositing complete:', result);
+
+        // Verify the composite file exists
+        const compositeExists = await invoke<boolean>('file_exists', { path: result });
+        if (!compositeExists) {
+            const errorMsg = `Composite command succeeded but file not found: ${result}`;
+            console.error('[compositeWebcamRecording]', errorMsg);
+            recordingError.set(errorMsg);
+            return null;
+        }
+
+        console.log('[compositeWebcamRecording] Composite file verified:', result);
+        return result;
+    } catch (error) {
+        const errorMsg = `Failed to composite webcam recording: ${error}`;
+        console.error('[compositeWebcamRecording]', errorMsg);
+        console.error('[compositeWebcamRecording] Details:', {
+            screenPath,
+            webcamPath,
+            outputPath,
+            overlayConfig,
+            error,
+        });
+        recordingError.set(errorMsg);
+        return null;
+    } finally {
+        // Clean up listeners
+        unlistenProgress();
+        unlistenComplete();
+        isCompositing.set(false);
+    }
 }

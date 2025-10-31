@@ -129,7 +129,7 @@ export async function checkSubtitleAvailable(): Promise<boolean> {
  * Transcribe timeline audio to generate subtitles
  */
 export async function transcribeTimelineAudio(
-    timelineId: string,
+    timeline: any,
     mediaFiles: any[],
     language?: string
 ): Promise<void> {
@@ -146,9 +146,15 @@ export async function transcribeTimelineAudio(
             },
         }));
 
+        // Convert mediaFiles array to HashMap for backend
+        const mediaFilesMap: Record<string, any> = {};
+        for (const mediaFile of mediaFiles) {
+            mediaFilesMap[mediaFile.id] = mediaFile;
+        }
+
         const track = await invoke<SubtitleTrack>('transcribe_timeline_audio', {
-            timelineId,
-            mediaFiles,
+            timeline,
+            mediaFiles: mediaFilesMap,
             language: language || null,
         });
 

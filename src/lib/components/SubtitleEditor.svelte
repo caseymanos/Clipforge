@@ -44,7 +44,7 @@
     }
 
     try {
-      await transcribeTimelineAudio(timeline.id, mediaFiles, selectedLanguage);
+      await transcribeTimelineAudio(timeline, mediaFiles, selectedLanguage);
     } catch (error) {
       alert(`Transcription failed: ${error}`);
     }

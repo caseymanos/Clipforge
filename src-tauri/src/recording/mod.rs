@@ -11,6 +11,9 @@ pub mod integration;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+#[cfg(target_os = "macos")]
+pub mod voice_processing;
+
 #[cfg(target_os = "windows")]
 pub mod windows;
 
@@ -121,6 +124,68 @@ impl Default for RecordingMode {
     }
 }
 
+/// Position for webcam overlay
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WebcamPosition {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Default for WebcamPosition {
+    fn default() -> Self {
+        Self::BottomRight
+    }
+}
+
+/// Shape for webcam overlay
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WebcamShape {
+    Square,
+    Circle,
+}
+
+impl Default for WebcamShape {
+    fn default() -> Self {
+        Self::Circle
+    }
+}
+
+/// Configuration for webcam overlay compositing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebcamOverlayConfig {
+    /// Position of webcam in the composite (default: BottomRight)
+    #[serde(default)]
+    pub position: WebcamPosition,
+
+    /// Shape of webcam overlay (default: Circle)
+    #[serde(default)]
+    pub shape: WebcamShape,
+
+    /// Width of webcam in pixels (default: 320)
+    #[serde(default = "default_webcam_size")]
+    pub size: u32,
+
+    /// Margin from edge in pixels (default: 20)
+    #[serde(default = "default_webcam_margin")]
+    pub margin: u32,
+}
+
+fn default_webcam_size() -> u32 { 320 }
+fn default_webcam_margin() -> u32 { 20 }
+
+impl Default for WebcamOverlayConfig {
+    fn default() -> Self {
+        Self {
+            position: WebcamPosition::default(),
+            shape: WebcamShape::default(),
+            size: default_webcam_size(),
+            margin: default_webcam_margin(),
+        }
+    }
+}
+
 /// Recording configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConfig {
@@ -163,6 +228,10 @@ pub struct RecordingConfig {
     /// Webcam output path (for dual recording mode)
     #[serde(default)]
     pub webcam_output_path: Option<PathBuf>,
+
+    /// Webcam overlay configuration (for post-recording compositing)
+    #[serde(default)]
+    pub webcam_overlay_config: Option<WebcamOverlayConfig>,
 }
 
 /// Screen region for cropped recording
@@ -191,6 +260,7 @@ impl Default for RecordingConfig {
             recording_mode: RecordingMode::default(),
             webcam_source: None,
             webcam_output_path: None,
+            webcam_overlay_config: None,
         }
     }
 }
