@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Allow app to access files selected by user -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+
+  <!-- Allow network access for potential future features -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!-- Required for screen recording feature -->
+  <key>com.apple.security.device.camera</key>
+  <true/>
+
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+
+  <!-- Allow hardened runtime -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <false/>
+
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <false/>
+
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <false/>
+
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <false/>
+
+  <!-- Allow app sandbox (if needed later) -->
+  <key>com.apple.security.app-sandbox</key>
+  <false/>
+
+  <!-- Disable automatic graphics switching for better video performance -->
+  <key>com.apple.security.temporary-exception.apple-events</key>
+  <false/>
+</dict>
+</plist>

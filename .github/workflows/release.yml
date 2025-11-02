@@ -1,0 +1,133 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+
+jobs:
+  build-and-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target universal-apple-darwin'
+            name: 'macOS'
+          - platform: 'ubuntu-22.04'
+            args: '--bundles appimage,deb'
+            name: 'Linux'
+          - platform: 'windows-latest'
+            args: ''
+            name: 'Windows'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check FFmpeg installation
+        shell: bash
+        run: |
+          if command -v ffmpeg &> /dev/null; then
+            echo "FFmpeg version:"
+            ffmpeg -version | head -n 1
+          else
+            echo "⚠️ Warning: FFmpeg not found in PATH"
+            echo "Build will succeed but app requires FFmpeg at runtime"
+          fi
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Uncomment when you have code signing certificates
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'ClipForge ${{ github.ref_name }}'
+          releaseBody: |
+            ## ClipForge ${{ github.ref_name }}
+
+            ### Installation Requirements
+
+            **All platforms require FFmpeg to be installed:**
+
+            - **macOS**: `brew install ffmpeg`
+            - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH
+            - **Linux (Debian/Ubuntu)**: `sudo apt install ffmpeg`
+
+            ### Downloads
+
+            Choose the appropriate installer for your platform below.
+
+            ### Checksums
+
+            See assets below for SHA256 checksums.
+
+            ---
+
+            See [INSTALLATION.md](https://github.com/${{ github.repository }}/blob/main/INSTALLATION.md) for detailed installation instructions.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd src-tauri/target/release/bundle
+          for file in */*; do
+            if [ -f "$file" ]; then
+              sha256sum "$file" > "$file.sha256"
+            fi
+          done
+
+  create-checksums-file:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Generate checksums summary
+        run: |
+          echo "# SHA256 Checksums" > CHECKSUMS.txt
+          echo "" >> CHECKSUMS.txt
+          find . -name "*.sha256" -exec cat {} \; >> CHECKSUMS.txt
+
+      - name: Upload checksums to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: CHECKSUMS.txt
+          tag_name: ${{ github.ref_name }}

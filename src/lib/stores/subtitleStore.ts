@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { playheadTime } from './timelineStore';
+import { playheadTime, timelineStore } from './timelineStore';
 
 // Types matching Rust backend
 export interface SubtitleSegment {
@@ -18,10 +18,17 @@ export interface SubtitleSource {
     file_path?: string;
 }
 
+export interface SubtitleStyle {
+    font_size: number;
+    font_name: string;
+    margin_v: number;
+}
+
 export interface SubtitleTrack {
     segments: SubtitleSegment[];
     language: string;
     source: SubtitleSource;
+    style: SubtitleStyle;
 }
 
 export interface SubtitleProgress {
@@ -122,16 +129,17 @@ export async function checkSubtitleAvailable(): Promise<boolean> {
  * Transcribe timeline audio to generate subtitles
  */
 export async function transcribeTimelineAudio(
-    timelineId: string,
+    timeline: any,
     mediaFiles: any[],
     language?: string
 ): Promise<void> {
     const previousState = get(subtitleStore);
 
     try {
-        // Optimistically set transcribing state
+        // Clear existing subtitles before regenerating to prevent duplication
         subtitleStore.update(state => ({
             ...state,
+            currentTrack: null,
             isTranscribing: true,
             transcriptionProgress: {
                 stage: 'Starting...',
@@ -139,9 +147,15 @@ export async function transcribeTimelineAudio(
             },
         }));
 
+        // Convert mediaFiles array to HashMap for backend
+        const mediaFilesMap: Record<string, any> = {};
+        for (const mediaFile of mediaFiles) {
+            mediaFilesMap[mediaFile.id] = mediaFile;
+        }
+
         const track = await invoke<SubtitleTrack>('transcribe_timeline_audio', {
-            timelineId,
-            mediaFiles,
+            timeline,
+            mediaFiles: mediaFilesMap,
             language: language || null,
         });
 
@@ -152,6 +166,13 @@ export async function transcribeTimelineAudio(
             isTranscribing: false,
             transcriptionProgress: null,
             enabled: true,  // Auto-enable after transcription
+        }));
+
+        // Sync subtitle track to timeline store to prevent duplication on regeneration
+        timelineStore.update(timeline => ({
+            ...timeline,
+            subtitle_track: track,
+            subtitle_enabled: true
         }));
 
     } catch (error) {
@@ -273,6 +294,12 @@ export async function toggleSubtitles(
             enabled,
         }));
 
+        // Sync to timeline store
+        timelineStore.update(timeline => ({
+            ...timeline,
+            subtitle_enabled: enabled
+        }));
+
         // Sync backend
         await invoke('toggle_subtitles', {
             timelineId,
@@ -329,6 +356,13 @@ export async function importSubtitlesSRT(
             enabled: true,
         }));
 
+        // Sync imported subtitle track to timeline store
+        timelineStore.update(timeline => ({
+            ...timeline,
+            subtitle_track: track,
+            subtitle_enabled: true
+        }));
+
     } catch (error) {
         console.error('Failed to import SRT:', error);
         subtitleStore.set(previousState);
@@ -347,6 +381,26 @@ export function setEditingSegment(segmentId: number | null): void {
 }
 
 /**
+ * Update subtitle style
+ */
+export function updateSubtitleStyle(style: Partial<SubtitleStyle>): void {
+    subtitleStore.update(state => {
+        if (!state.currentTrack) return state;
+
+        return {
+            ...state,
+            currentTrack: {
+                ...state.currentTrack,
+                style: {
+                    ...state.currentTrack.style,
+                    ...style,
+                },
+            },
+        };
+    });
+}
+
+/**
  * Clear subtitle track
  */
 export function clearSubtitles(): void {
@@ -354,5 +408,12 @@ export function clearSubtitles(): void {
         ...state,
         currentTrack: null,
         enabled: false,
+    }));
+
+    // Clear from timeline store as well
+    timelineStore.update(timeline => ({
+        ...timeline,
+        subtitle_track: null,
+        subtitle_enabled: false
     }));
 }

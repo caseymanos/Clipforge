@@ -155,12 +155,15 @@ fn main() {
             commands::apply_video_filter,
             // Module 4 commands
             commands::list_recording_sources,
+            commands::list_audio_devices,
             commands::check_recording_permissions,
             commands::request_recording_permissions,
             commands::start_recording,
             commands::stop_recording,
             commands::get_recording_state,
             commands::get_recording_duration,
+            commands::file_exists,
+            commands::composite_webcam_recording,
             // Module 5 commands
             timeline_commands::create_timeline,
             timeline_commands::get_current_timeline,

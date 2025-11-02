@@ -51,6 +51,24 @@
   let lastFpsUpdate = performance.now();
   let showFps = true;
 
+  // Video sizing mode
+  type SizingMode = 'contain' | 'cover' | 'fill' | 'auto-height' | 'large';
+  let sizingMode: SizingMode = 'auto-height';
+
+  const sizingModes: { mode: SizingMode; label: string; description: string }[] = [
+    { mode: 'contain', label: 'Contain', description: 'Letterboxed, shows full video' },
+    { mode: 'cover', label: 'Cover', description: 'Fills container, may crop' },
+    { mode: 'fill', label: 'Fill', description: 'Stretches to fill container' },
+    { mode: 'auto-height', label: 'Auto', description: 'Expands to available space' },
+    { mode: 'large', label: 'Large', description: 'Larger fixed container' }
+  ];
+
+  function cycleSizingMode() {
+    const currentIndex = sizingModes.findIndex(m => m.mode === sizingMode);
+    const nextIndex = (currentIndex + 1) % sizingModes.length;
+    sizingMode = sizingModes[nextIndex].mode;
+  }
+
   // Sync with timeline playhead
   $: currentTime = $playheadTime;
 
@@ -342,7 +360,17 @@
         if (info) {
           audioElement.currentTime = info.clipRelativeTime;
         }
-        audioElement.play().catch(err => console.error('Audio play error:', err));
+        // Only play if audio is ready (readyState >= 2 means metadata loaded)
+        if (audioElement.readyState >= 2) {
+          audioElement.play().catch(err => console.error('Audio play error:', err));
+        } else {
+          // Wait for metadata to load, then play
+          console.log('[VideoPreview] Waiting for audio to load before playing');
+          const handleCanPlay = () => {
+            audioElement.play().catch(err => console.error('Audio delayed play error:', err));
+          };
+          audioElement.addEventListener('canplay', handleCanPlay, { once: true });
+        }
       }
     }
   }
@@ -491,11 +519,46 @@
     if (autoPlay) {
       play();
     }
+
+    // Render indicators in header
+    renderIndicatorsToHeader();
   });
 
   onDestroy(() => {
     pause();
+
+    // Clean up indicators from header
+    const target = document.getElementById('preview-indicators-target');
+    if (target) {
+      target.innerHTML = '';
+    }
   });
+
+  // Re-render indicators when media state changes
+  $: if (typeof window !== 'undefined') {
+    renderIndicatorsToHeader();
+  }
+
+  function renderIndicatorsToHeader() {
+    const target = document.getElementById('preview-indicators-target');
+    if (!target) return;
+
+    if (hasVideo || hasAudio) {
+      const modeText = isComposite ? '🎬 Composite' : '▶️ Direct';
+      const codecText = getCurrentClipInfo()?.codec || '';
+      const fileName = getCurrentClipInfo()?.fileName || '';
+
+      target.innerHTML = `
+        <div class="indicator mode-indicator ${isComposite ? 'composite' : ''}">
+          ${modeText}
+        </div>
+        ${codecText ? `<div class="indicator codec-indicator">${codecText}</div>` : ''}
+        ${fileName ? `<div class="indicator file-indicator" title="${fileName}">📄 ${fileName}</div>` : ''}
+      `;
+    } else {
+      target.innerHTML = '';
+    }
+  }
 
   function formatTime(seconds: number): string {
     const mins = Math.floor(seconds / 60);
@@ -837,7 +900,11 @@
   }
 </script>
 
-<div class="video-preview">
+<div class="video-preview" class:sizing-contain={sizingMode === 'contain'}
+     class:sizing-cover={sizingMode === 'cover'}
+     class:sizing-fill={sizingMode === 'fill'}
+     class:sizing-auto={sizingMode === 'auto-height'}
+     class:sizing-large={sizingMode === 'large'}>
   <div class="preview-container">
     <!-- FPS Overlay -->
     {#if showFps && isPlaying}
@@ -871,7 +938,19 @@
           muted={hasAudio}
           preload="metadata"
           playsinline
-          on:loadedmetadata={(e) => { duration = e.currentTarget.duration; }}
+          class:video-contain={sizingMode === 'contain'}
+          class:video-cover={sizingMode === 'cover'}
+          class:video-fill={sizingMode === 'fill'}
+          on:loadedmetadata={(e) => {
+            duration = e.currentTarget.duration;
+            // Seek to the correct frame immediately after loading metadata
+            // This ensures the first frame is visible without needing to press play
+            if (clipInfo && !isPlaying) {
+              const targetTime = clipInfo.clipRelativeTime;
+              console.log('[VideoPreview] Video metadata loaded, seeking to first frame:', targetTime);
+              e.currentTarget.currentTime = targetTime;
+            }
+          }}
           on:ended={() => {
             // Video element reached its natural end - handle transition to next clip
             console.log('[VideoPreview] Video element ended event fired');
@@ -1000,7 +1079,7 @@
       <audio
         bind:this={audioElement}
         src={hasAudio ? currentAudioUrl : ''}
-        preload="metadata"
+        preload="auto"
         style="display: none;"
         on:loadedmetadata={() => {
           // Restore audio time if we have a pending time (from same-file transition)
@@ -1140,22 +1219,6 @@
       </div>
     {/if}
 
-    <!-- Preview state indicators -->
-    {#if hasVideo || hasAudio}
-      <div class="preview-indicators">
-        <div class="indicator mode-indicator" class:composite={isComposite}>
-          {isComposite ? '🎬 Composite' : '▶️ Direct'}
-        </div>
-        {#if getCurrentClipInfo()}
-          <div class="indicator codec-indicator">
-            {getCurrentClipInfo()?.codec}
-          </div>
-          <div class="indicator file-indicator" title={getCurrentClipInfo()?.fileName}>
-            📄 {getCurrentClipInfo()?.fileName}
-          </div>
-        {/if}
-      </div>
-    {/if}
   </div>
 
   <div class="controls">
@@ -1191,6 +1254,15 @@
         2x
       </button>
     </div>
+
+    <button
+      on:click={cycleSizingMode}
+      class="sizing-toggle-btn"
+      title={sizingModes.find(m => m.mode === sizingMode)?.description}
+    >
+      <span class="sizing-icon">⛶</span>
+      {sizingModes.find(m => m.mode === sizingMode)?.label}
+    </button>
   </div>
 </div>
 
@@ -1201,7 +1273,34 @@
     gap: 1rem;
     width: 100%;
     height: 100%;
-    max-height: 600px;  /* Prevent container from growing beyond this */
+    max-height: 600px;  /* Default: Prevent container from growing beyond this */
+  }
+
+  /* Sizing mode: Contain (default) */
+  .video-preview.sizing-contain {
+    max-height: 600px;
+  }
+
+  /* Sizing mode: Cover */
+  .video-preview.sizing-cover {
+    max-height: 600px;
+  }
+
+  /* Sizing mode: Fill */
+  .video-preview.sizing-fill {
+    max-height: 600px;
+  }
+
+  /* Sizing mode: Auto Height - expands to available space */
+  .video-preview.sizing-auto {
+    max-height: none;
+    height: auto;
+    min-height: 400px;
+  }
+
+  /* Sizing mode: Large - bigger fixed container */
+  .video-preview.sizing-large {
+    max-height: 900px;
   }
 
   .preview-container {
@@ -1255,6 +1354,19 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+  }
+
+  /* Video object-fit modes */
+  video.video-contain {
+    object-fit: contain;
+  }
+
+  video.video-cover {
+    object-fit: cover;
+  }
+
+  video.video-fill {
+    object-fit: fill;
   }
 
   .composite-preview {
@@ -1327,50 +1439,6 @@
     font-style: italic;
   }
 
-  .preview-indicators {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    align-items: flex-end;
-    pointer-events: none;
-  }
-
-  .indicator {
-    padding: 0.5rem 0.75rem;
-    background: rgba(0, 0, 0, 0.7);
-    color: #fff;
-    font-size: 0.85rem;
-    font-family: monospace;
-    border-radius: 0.25rem;
-    backdrop-filter: blur(10px);
-    white-space: nowrap;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .mode-indicator {
-    background: rgba(102, 126, 234, 0.8);
-    font-weight: 600;
-  }
-
-  .mode-indicator.composite {
-    background: rgba(234, 102, 126, 0.8);
-  }
-
-  .codec-indicator {
-    background: rgba(52, 211, 153, 0.8);
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-
-  .file-indicator {
-    font-size: 0.75rem;
-    background: rgba(0, 0, 0, 0.6);
-  }
 
   .controls {
     display: flex;
@@ -1456,5 +1524,29 @@
   .speed-controls button {
     padding: 0.5rem;
     min-width: 3rem;
+  }
+
+  .sizing-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.75rem;
+    background: #667eea;
+    color: #fff;
+    border: none;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background 0.2s;
+    white-space: nowrap;
+  }
+
+  .sizing-toggle-btn:hover {
+    background: #5568d3;
+  }
+
+  .sizing-icon {
+    font-size: 1.1rem;
   }
 </style>

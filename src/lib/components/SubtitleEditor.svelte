@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { subtitleStore, currentSubtitle, transcribeTimelineAudio, updateSubtitleSegment, deleteSubtitleSegment, toggleSubtitles, exportSubtitlesSRT, importSubtitlesSRT, setEditingSegment, setOpenAIApiKey, checkSubtitleAvailable } from '../stores/subtitleStore';
+  import { subtitleStore, currentSubtitle, transcribeTimelineAudio, updateSubtitleSegment, deleteSubtitleSegment, toggleSubtitles, exportSubtitlesSRT, importSubtitlesSRT, setEditingSegment, setOpenAIApiKey, checkSubtitleAvailable, updateSubtitleStyle } from '../stores/subtitleStore';
   import { timelineStore } from '../stores/timelineStore';
   import { mediaLibraryStore } from '../stores/mediaLibraryStore';
   import { playheadTime } from '../stores/timelineStore';
@@ -10,6 +10,8 @@
   let showApiKeyInput = false;
   let selectedLanguage = 'en';
   let editingText: { [key: number]: string } = {};
+  let segmentsCollapsed = false;
+  let progressCollapsed = false;
 
   onMount(async () => {
     // Check if API key is already configured
@@ -29,7 +31,12 @@
   }
 
   async function handleTranscribe() {
-    const timeline = $timelineStore;
+    // Clear old subtitle data from timeline to prevent duplication on regeneration
+    const timeline = {
+      ...$timelineStore,
+      subtitle_track: null,     // Clear old subtitles
+      subtitle_enabled: false   // Reset enabled flag
+    };
     const mediaFiles = $mediaLibraryStore;
 
     if (!timeline) {
@@ -44,7 +51,7 @@
     }
 
     try {
-      await transcribeTimelineAudio(timeline.id, mediaFiles, selectedLanguage);
+      await transcribeTimelineAudio(timeline, mediaFiles, selectedLanguage);
     } catch (error) {
       alert(`Transcription failed: ${error}`);
     }
@@ -201,28 +208,64 @@
     </div>
   </div>
 
+  {#if $subtitleStore.currentTrack}
+    <div class="style-section">
+      <h4>Subtitle Style</h4>
+      <div class="style-controls">
+        <label class="style-control">
+          <span class="style-label">Font Size: {$subtitleStore.currentTrack.style.font_size}px</span>
+          <input
+            type="range"
+            min="12"
+            max="48"
+            step="1"
+            value={$subtitleStore.currentTrack.style.font_size}
+            on:input={(e) => updateSubtitleStyle({ font_size: parseInt(e.currentTarget.value) })}
+          />
+        </label>
+      </div>
+    </div>
+  {/if}
+
   {#if $subtitleStore.isTranscribing && $subtitleStore.transcriptionProgress}
-    <div class="progress">
-      <div class="progress-bar">
-        <div
-          class="progress-fill"
-          style="width: {$subtitleStore.transcriptionProgress.progress * 100}%"
-        ></div>
+    <div class="collapsible-section">
+      <div class="collapsible-header" on:click={() => progressCollapsed = !progressCollapsed}>
+        <span class="chevron" class:collapsed={progressCollapsed}>▼</span>
+        <h4>Transcription Progress</h4>
+        <span class="toggle-text">{progressCollapsed ? 'View' : 'Hide'}</span>
       </div>
-      <div class="progress-text">
-        {$subtitleStore.transcriptionProgress.stage} - {Math.round($subtitleStore.transcriptionProgress.progress * 100)}%
-      </div>
+      {#if !progressCollapsed}
+        <div class="progress">
+          <div class="progress-bar">
+            <div
+              class="progress-fill"
+              style="width: {$subtitleStore.transcriptionProgress.progress * 100}%"
+            ></div>
+          </div>
+          <div class="progress-text">
+            {$subtitleStore.transcriptionProgress.stage} - {Math.round($subtitleStore.transcriptionProgress.progress * 100)}%
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 
   {#if $subtitleStore.currentTrack}
     <div class="segments">
-      <div class="segments-header">
-        <span>{$subtitleStore.currentTrack.segments.length} segments</span>
-        <span>Language: {$subtitleStore.currentTrack.language}</span>
+      <div class="collapsible-header" on:click={() => segmentsCollapsed = !segmentsCollapsed}>
+        <span class="chevron" class:collapsed={segmentsCollapsed}>▼</span>
+        <div class="segments-header-content">
+          <h4>Subtitle Segments</h4>
+          <div class="segments-meta">
+            <span>{$subtitleStore.currentTrack.segments.length} segments</span>
+            <span>Language: {$subtitleStore.currentTrack.language}</span>
+          </div>
+        </div>
+        <span class="toggle-text">{segmentsCollapsed ? 'View' : 'Hide'}</span>
       </div>
 
-      <div class="segments-list">
+      {#if !segmentsCollapsed}
+        <div class="segments-list">
         {#each $subtitleStore.currentTrack.segments as segment}
           <div
             class="segment"
@@ -260,7 +303,8 @@
             {/if}
           </div>
         {/each}
-      </div>
+        </div>
+      {/if}
     </div>
   {:else if !$subtitleStore.isTranscribing}
     <div class="empty-state">
@@ -456,5 +500,126 @@
     color: #aaa;
     text-align: center;
     padding: 2rem;
+  }
+
+  .style-section {
+    padding: 1rem;
+    background: #2a2a2a;
+    border-radius: 0.25rem;
+  }
+
+  .style-section h4 {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.95rem;
+    color: #e0e0e0;
+  }
+
+  .style-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .style-control {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .style-label {
+    font-size: 0.875rem;
+    color: #aaa;
+  }
+
+  .style-control input[type="range"] {
+    width: 100%;
+    height: 6px;
+    background: #444;
+    border-radius: 3px;
+    outline: none;
+    -webkit-appearance: none;
+  }
+
+  .style-control input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #4a9eff;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .style-control input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #4a9eff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+  }
+
+  .collapsible-section {
+    background: #2a2a2a;
+    border-radius: 0.25rem;
+    overflow: hidden;
+  }
+
+  .collapsible-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    background: #2a2a2a;
+    border-bottom: 1px solid #444;
+    transition: background 0.2s;
+  }
+
+  .collapsible-header:hover {
+    background: #333;
+  }
+
+  .collapsible-header h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 500;
+  }
+
+  .chevron {
+    font-size: 1rem;
+    transition: transform 0.2s;
+    display: inline-block;
+    color: #aaa;
+  }
+
+  .chevron.collapsed {
+    transform: rotate(-90deg);
+  }
+
+  .toggle-text {
+    font-size: 0.875rem;
+    color: #4a9eff;
+    margin-left: auto;
+    font-weight: 500;
+  }
+
+  .segments-header-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+  }
+
+  .segments-meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.875rem;
+    color: #aaa;
+  }
+
+  .segments.segments {
+    background: transparent;
   }
 </style>

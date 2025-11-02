@@ -3,6 +3,7 @@ use std::process::Command;
 use uuid::Uuid;
 use crate::models::ThumbnailError;
 use crate::ffmpeg_utils;
+use std::time::Duration;
 
 /// Service for generating video thumbnails
 pub struct ThumbnailGenerator {
@@ -65,26 +66,58 @@ impl ThumbnailGenerator {
 
         log::debug!("Generating thumbnail for {:?} at {}s", video_path, timestamp);
 
-        let status = Command::new(&self.ffmpeg_path)
-            .args([
-                "-ss", &timestamp.to_string(),
-                "-i", video_path_str,
-                "-vframes", "1",
-                "-vf", "scale=320:-1",  // Width 320px, height auto
-                "-q:v", "2",             // High quality JPEG
-                "-y",                    // Overwrite if exists
-                output_path_str,
-            ])
-            .output()
-            .map_err(ThumbnailError::IoError)?;
-
-        if !status.status.success() {
-            log::error!("FFmpeg thumbnail generation failed for {:?}", video_path);
-            return Err(ThumbnailError::GenerationFailed);
+        // Verify file is readable before attempting
+        if !video_path.exists() {
+            log::error!("Video file does not exist: {:?}", video_path);
+            return Err(ThumbnailError::IoError(
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Video file not found: {:?}", video_path)
+                )
+            ));
         }
 
-        log::info!("Thumbnail generated: {:?}", output_path);
-        Ok(output_path)
+        // Retry logic with exponential backoff: 3 attempts with 500ms, 1s, 2s delays
+        const MAX_ATTEMPTS: u32 = 3;
+        const RETRY_DELAYS_MS: [u64; 2] = [500, 1000]; // Delays after 1st and 2nd failures
+
+        let mut last_error = None;
+
+        for attempt in 0..MAX_ATTEMPTS {
+            if attempt > 0 {
+                let delay_ms = RETRY_DELAYS_MS[(attempt - 1) as usize];
+                log::warn!("Thumbnail generation attempt {} failed, retrying in {}ms...", attempt, delay_ms);
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+
+            let status = Command::new(&self.ffmpeg_path)
+                .args([
+                    "-ss", &timestamp.to_string(),
+                    "-i", video_path_str,
+                    "-vframes", "1",
+                    "-vf", "scale=320:-1",  // Width 320px, height auto
+                    "-q:v", "2",             // High quality JPEG
+                    "-y",                    // Overwrite if exists
+                    output_path_str,
+                ])
+                .output()
+                .map_err(ThumbnailError::IoError)?;
+
+            if status.status.success() {
+                log::info!("Thumbnail generated successfully: {:?}", output_path);
+                return Ok(output_path);
+            }
+
+            last_error = Some(format!(
+                "FFmpeg stderr: {}",
+                String::from_utf8_lossy(&status.stderr)
+            ));
+            log::error!("FFmpeg thumbnail generation failed for {:?} (attempt {}): {:?}",
+                video_path, attempt + 1, last_error);
+        }
+
+        log::error!("All {} thumbnail generation attempts failed for {:?}", MAX_ATTEMPTS, video_path);
+        Err(ThumbnailError::GenerationFailed)
     }
 
     /// Generate a sequence of thumbnails across the video duration
