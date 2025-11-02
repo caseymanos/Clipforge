@@ -62,8 +62,8 @@ pub async fn transcribe_timeline_audio(
             continue;
         }
 
-        // Get audio from video tracks and audio tracks
-        if matches!(track.track_type, TrackType::Video | TrackType::Audio) {
+        // Get audio from audio tracks only (video files have matching audio tracks)
+        if matches!(track.track_type, TrackType::Audio) {
             for clip in &track.clips {
                 // Get the media file for this clip
                 if let Some(media_file) = media_files.get(&clip.media_file_id) {

@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { playheadTime } from './timelineStore';
+import { playheadTime, timelineStore } from './timelineStore';
 
 // Types matching Rust backend
 export interface SubtitleSegment {
@@ -136,9 +136,10 @@ export async function transcribeTimelineAudio(
     const previousState = get(subtitleStore);
 
     try {
-        // Optimistically set transcribing state
+        // Clear existing subtitles before regenerating to prevent duplication
         subtitleStore.update(state => ({
             ...state,
+            currentTrack: null,
             isTranscribing: true,
             transcriptionProgress: {
                 stage: 'Starting...',
@@ -165,6 +166,13 @@ export async function transcribeTimelineAudio(
             isTranscribing: false,
             transcriptionProgress: null,
             enabled: true,  // Auto-enable after transcription
+        }));
+
+        // Sync subtitle track to timeline store to prevent duplication on regeneration
+        timelineStore.update(timeline => ({
+            ...timeline,
+            subtitle_track: track,
+            subtitle_enabled: true
         }));
 
     } catch (error) {
@@ -286,6 +294,12 @@ export async function toggleSubtitles(
             enabled,
         }));
 
+        // Sync to timeline store
+        timelineStore.update(timeline => ({
+            ...timeline,
+            subtitle_enabled: enabled
+        }));
+
         // Sync backend
         await invoke('toggle_subtitles', {
             timelineId,
@@ -342,6 +356,13 @@ export async function importSubtitlesSRT(
             enabled: true,
         }));
 
+        // Sync imported subtitle track to timeline store
+        timelineStore.update(timeline => ({
+            ...timeline,
+            subtitle_track: track,
+            subtitle_enabled: true
+        }));
+
     } catch (error) {
         console.error('Failed to import SRT:', error);
         subtitleStore.set(previousState);
@@ -387,5 +408,12 @@ export function clearSubtitles(): void {
         ...state,
         currentTrack: null,
         enabled: false,
+    }));
+
+    // Clear from timeline store as well
+    timelineStore.update(timeline => ({
+        ...timeline,
+        subtitle_track: null,
+        subtitle_enabled: false
     }));
 }
