@@ -226,6 +226,7 @@ export async function loadRecordingSources(filter: SourceTypeFilter = 'all'): Pr
         console.log('[loadRecordingSources] Calling backend list_recording_sources...');
         const sources = await invoke<RecordingSource[]>('list_recording_sources', { filter });
         console.log('[loadRecordingSources] Received', sources.length, 'sources:', sources);
+        console.log('[loadRecordingSources] Webcam sources:', sources.filter(s => s.type === 'webcam').map(s => ({ id: s.id, name: s.name })));
         availableSources.set(sources);
 
         // Auto-select first source if none selected
@@ -284,7 +285,14 @@ export async function loadAudioDevices(): Promise<void> {
  * Start recording with the current configuration
  */
 export async function startRecording(): Promise<boolean> {
+    // Clear any previous errors
     recordingError.set(null);
+
+    // Clear recording state error message
+    recordingState.update(state => ({
+        ...state,
+        error_message: null,
+    }));
 
     try {
         // Get current values from stores using get() to avoid closure bugs
@@ -339,11 +347,14 @@ export async function startRecording(): Promise<boolean> {
         // Get webcam source object if needed
         let webcamSource: RecordingSource | undefined;
         if (mode === 'WebcamOnly' || mode === 'ScreenAndWebcam') {
+            console.log('[startRecording] Looking for webcam with ID:', webcamId);
+            console.log('[startRecording] Available webcam sources:', sources.filter(s => s.type === 'webcam').map(s => ({ id: s.id, name: s.name })));
             webcamSource = sources.find(s => s.id === webcamId && s.type === 'webcam');
             if (!webcamSource) {
                 recordingError.set('Selected webcam not found');
                 return false;
             }
+            console.log('[startRecording] Selected webcam source:', { id: webcamSource.id, name: webcamSource.name });
         }
 
         const fullConfig: RecordingConfig = {
@@ -383,11 +394,24 @@ export async function startRecording(): Promise<boolean> {
         return true;
     } catch (error) {
         console.error('Failed to start recording:', error);
-        recordingError.set(error as string);
+
+        // Extract user-friendly error message
+        const errorMsg = error as string;
+        let displayError = errorMsg;
+
+        // Simplify common error messages for better UX
+        if (errorMsg.includes('Failed to access webcam')) {
+            // Already user-friendly from backend
+            displayError = errorMsg.split('. Technical details:')[0]; // Show only user-friendly part
+        } else if (errorMsg.includes('Camera') || errorMsg.includes('webcam')) {
+            displayError = `Camera error: ${errorMsg}`;
+        }
+
+        recordingError.set(displayError);
         recordingState.update(state => ({
             ...state,
             state: 'Error',
-            error_message: error as string,
+            error_message: displayError,
         }));
         return false;
     }

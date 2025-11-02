@@ -35,11 +35,16 @@ if ! command -v pkg-config &> /dev/null; then
     brew install pkg-config
 fi
 
-# Check for x264 library
-echo -e "${BLUE}Step 2: Checking for libx264...${NC}"
-if ! pkg-config --exists x264; then
-    echo "libx264 not found. Installing via Homebrew..."
-    brew install x264
+# Check for libmp3lame (required for MP3 encoding)
+if ! pkg-config --exists lame 2>/dev/null; then
+    echo "Warning: libmp3lame not found. Installing via Homebrew..."
+    brew install lame
+fi
+
+# Check for libass (required for subtitles filter)
+if ! pkg-config --exists libass 2>/dev/null; then
+    echo "Warning: libass not found. Installing via Homebrew..."
+    brew install libass
 fi
 
 echo -e "${GREEN}✓ Dependencies OK${NC}"
@@ -61,15 +66,21 @@ fi
 cd "$BUILD_DIR/ffmpeg"
 
 echo -e "${BLUE}Step 5: Configuring FFmpeg...${NC}"
+
+# Set library paths for Homebrew libraries
+export PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:$PKG_CONFIG_PATH"
+export LDFLAGS="-L/opt/homebrew/lib"
+export CPPFLAGS="-I/opt/homebrew/include"
+
 ./configure \
   --prefix="$INSTALL_DIR" \
   --arch=arm64 \
   --target-os=darwin \
   --cc=clang \
+  --extra-cflags="-I/opt/homebrew/include" \
+  --extra-ldflags="-L/opt/homebrew/lib" \
   \
-  `# Disable everything by default` \
-  --disable-all \
-  --disable-autodetect \
+  `# Disable non-essential components` \
   --disable-doc \
   --disable-htmlpages \
   --disable-manpages \
@@ -79,6 +90,12 @@ echo -e "${BLUE}Step 5: Configuring FFmpeg...${NC}"
   --disable-ffplay \
   --disable-network \
   --disable-postproc \
+  --disable-sdl2 \
+  --disable-xlib \
+  --disable-libxcb \
+  --disable-libxcb-shm \
+  --disable-libxcb-xfixes \
+  --disable-libxcb-shape \
   \
   `# Enable core components` \
   --enable-ffmpeg \
@@ -86,12 +103,13 @@ echo -e "${BLUE}Step 5: Configuring FFmpeg...${NC}"
   --enable-avcodec \
   --enable-avformat \
   --enable-avfilter \
+  --enable-avdevice \
   --enable-swscale \
   --enable-swresample \
   \
-  `# Video codecs - encoders` \
-  --enable-libx264 \
-  --enable-encoder=libx264 \
+  `# Video codecs - encoders (use native VideoToolbox, not x264)` \
+  --enable-encoder=h264_videotoolbox \
+  --enable-encoder=hevc_videotoolbox \
   --enable-encoder=mjpeg \
   \
   `# Video codecs - decoders` \
@@ -105,6 +123,7 @@ echo -e "${BLUE}Step 5: Configuring FFmpeg...${NC}"
   `# Audio codecs - encoders` \
   --enable-encoder=aac \
   --enable-encoder=pcm_s16le \
+  --enable-encoder=libmp3lame \
   \
   `# Audio codecs - decoders` \
   --enable-decoder=aac \
@@ -129,6 +148,7 @@ echo -e "${BLUE}Step 5: Configuring FFmpeg...${NC}"
   --enable-muxer=image2 \
   --enable-muxer=mjpeg \
   --enable-muxer=wav \
+  --enable-muxer=mp3 \
   \
   `# Filters - Video` \
   --enable-filter=scale \
@@ -147,6 +167,7 @@ echo -e "${BLUE}Step 5: Configuring FFmpeg...${NC}"
   --enable-filter=color \
   --enable-filter=fps \
   --enable-filter=overlay \
+  --enable-filter=subtitles \
   \
   `# Filters - Audio` \
   --enable-filter=volume \
@@ -181,6 +202,8 @@ echo -e "${BLUE}Step 5: Configuring FFmpeg...${NC}"
   --enable-pthreads \
   --enable-zlib \
   --enable-gpl \
+  --enable-libass \
+  --enable-libmp3lame \
   --pkg-config-flags="--static"
 
 echo -e "${GREEN}✓ Configuration complete${NC}"

@@ -28,7 +28,8 @@
     "longDescription": "A modern, performant desktop video editor built with Tauri and Rust",
     "macOS": {
       "minimumSystemVersion": "11.0",
-      "entitlements": "entitlements.plist"
+      "entitlements": "entitlements.plist",
+      "infoPlist": "Info.plist"
     },
     "windows": {
       "digestAlgorithm": "sha256"

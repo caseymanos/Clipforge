@@ -360,7 +360,17 @@
         if (info) {
           audioElement.currentTime = info.clipRelativeTime;
         }
-        audioElement.play().catch(err => console.error('Audio play error:', err));
+        // Only play if audio is ready (readyState >= 2 means metadata loaded)
+        if (audioElement.readyState >= 2) {
+          audioElement.play().catch(err => console.error('Audio play error:', err));
+        } else {
+          // Wait for metadata to load, then play
+          console.log('[VideoPreview] Waiting for audio to load before playing');
+          const handleCanPlay = () => {
+            audioElement.play().catch(err => console.error('Audio delayed play error:', err));
+          };
+          audioElement.addEventListener('canplay', handleCanPlay, { once: true });
+        }
       }
     }
   }
@@ -931,7 +941,16 @@
           class:video-contain={sizingMode === 'contain'}
           class:video-cover={sizingMode === 'cover'}
           class:video-fill={sizingMode === 'fill'}
-          on:loadedmetadata={(e) => { duration = e.currentTarget.duration; }}
+          on:loadedmetadata={(e) => {
+            duration = e.currentTarget.duration;
+            // Seek to the correct frame immediately after loading metadata
+            // This ensures the first frame is visible without needing to press play
+            if (clipInfo && !isPlaying) {
+              const targetTime = clipInfo.clipRelativeTime;
+              console.log('[VideoPreview] Video metadata loaded, seeking to first frame:', targetTime);
+              e.currentTarget.currentTime = targetTime;
+            }
+          }}
           on:ended={() => {
             // Video element reached its natural end - handle transition to next clip
             console.log('[VideoPreview] Video element ended event fired');
@@ -1060,7 +1079,7 @@
       <audio
         bind:this={audioElement}
         src={hasAudio ? currentAudioUrl : ''}
-        preload="metadata"
+        preload="auto"
         style="display: none;"
         on:loadedmetadata={() => {
           // Restore audio time if we have a pending time (from same-file transition)

@@ -120,3 +120,4 @@ pub fn start_voice_processing_capture(wav_path: PathBuf, sample_rate: f64, chann
 pub fn start_voice_processing_capture(_wav_path: PathBuf, _sample_rate: f64, _channels: u32) -> anyhow::Result<VoiceProcHandle> {
     anyhow::bail!("VoiceProcessing capture is only supported on macOS");
 }
+

@@ -63,14 +63,10 @@ impl ScreenPreviewGenerator {
         // Determine if this is a webcam device based on passed device_type
         let is_webcam = device_type == "webcam";
 
-        // Format device name correctly for AVFoundation
-        // Webcams use numeric IDs directly, screens/windows need "Capture screen {index}" format
-        let input_device = if is_webcam {
-            format!("{}:none", device_id)
-        } else {
-            // For screens/windows, use the device ID directly (it's already the screen index)
-            format!("Capture screen {}:none", device_id)
-        };
+        // Format device input for AVFoundation
+        // Both webcams and screens use numeric device IDs directly (e.g., "0:none", "5:none")
+        // FFmpeg expects the device ID, not the device name like "Capture screen 5"
+        let input_device = format!("{}:none", device_id);
 
         // Build FFmpeg command - webcams need different parameters than screens
         // Try multiple framerates for webcams since different models support different rates
@@ -104,7 +100,22 @@ impl ScreenPreviewGenerator {
             cmd.arg("-y");                        // Overwrite if exists
             cmd.arg(output_path_str);
 
-            let status = cmd.output().map_err(ThumbnailError::IoError)?;
+            // Add 5-second timeout to prevent hanging
+            let output_future = tokio::task::spawn_blocking(move || cmd.output());
+            let status = match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                output_future
+            ).await {
+                Ok(Ok(output_result)) => output_result.map_err(ThumbnailError::IoError)?,
+                Ok(Err(_)) => {
+                    log::warn!("FFmpeg preview spawn task failed for device {} at {}fps", device_id, framerate);
+                    continue;  // Try next framerate
+                }
+                Err(_) => {
+                    log::warn!("FFmpeg preview timed out after 5s for device {} at {}fps", device_id, framerate);
+                    continue;  // Try next framerate
+                }
+            };
 
             if status.status.success() {
                 success = true;

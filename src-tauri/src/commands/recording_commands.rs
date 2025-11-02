@@ -227,6 +227,7 @@ pub fn file_exists(path: String) -> Result<bool, String> {
 ///
 /// Takes two separate video files (screen and webcam) and composites them
 /// using the provided overlay configuration. Returns the path to the composite video.
+/// Automatically detects and includes separate audio file (mic-voiceproc.wav) if present.
 #[tauri::command]
 pub async fn composite_webcam_recording(
     app: AppHandle,
@@ -247,6 +248,21 @@ pub async fn composite_webcam_recording(
     let screen_path = PathBuf::from(&screen_path);
     let webcam_path = PathBuf::from(&webcam_path);
     let output_path = PathBuf::from(&output_path);
+
+    // Check for separate audio file (Voice Processing audio)
+    // Look for mic-voiceproc.wav in the same directory as the screen recording
+    let audio_path = if let Some(parent_dir) = screen_path.parent() {
+        let mic_audio = parent_dir.join("mic-voiceproc.wav");
+        if mic_audio.exists() {
+            info!("Found separate audio file: {:?}", mic_audio);
+            Some(mic_audio)
+        } else {
+            info!("No separate audio file found, will use screen recording audio");
+            None
+        }
+    } else {
+        None
+    };
 
     // Validate input files exist
     if !screen_path.exists() {
@@ -294,6 +310,7 @@ pub async fn composite_webcam_recording(
             &output_path,
             &overlay_config,
             Some(progress_callback),
+            audio_path.as_deref(),
         )
         .await
         .map_err(|e| {

@@ -434,15 +434,16 @@ impl ExportService {
                         // Normalize path for FFmpeg (use forward slashes on all platforms)
                         let srt_path = temp_srt.to_string_lossy().replace("\\", "/");
 
-                        // Escape special characters for FFmpeg filter syntax
-                        let escaped_path = srt_path
-                            .replace(":", "\\:")
-                            .replace("'", "\\'");
+                        // For FFmpeg filter syntax with single quotes, we need to escape:
+                        // - Single quotes as '\'' (close quote, escaped quote, open quote)
+                        // - Backslashes before single quotes
+                        let escaped_path = srt_path.replace("'", "'\\''");
 
                         // Add subtitles filter using configurable style
                         let style = &subtitle_track.style;
+                        // Use filename= parameter to explicitly mark where the path ends
                         let subtitle_filter = format!(
-                            "[vconcat]subtitles='{}':force_style='FontName={},FontSize={},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=1,MarginV={}'[outv]",
+                            "[vconcat]subtitles=filename='{}':force_style='FontName={}\\,FontSize={}\\,PrimaryColour=&H00FFFFFF\\,OutlineColour=&H00000000\\,BorderStyle=3\\,Outline=2\\,Shadow=1\\,MarginV={}'[outv]",
                             escaped_path,
                             style.font_name,
                             style.font_size,

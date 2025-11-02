@@ -29,6 +29,7 @@ struct RecorderState {
     temp_video_path: Option<PathBuf>,    // Video-only temp path when VPIO enabled
     temp_audio_path: Option<PathBuf>,    // WAV captured via VPIO
     voice_handle: Option<VoiceProcHandle>,
+    webcam_overlay_config: Option<super::WebcamOverlayConfig>, // Configuration for compositing
     start_time: Option<Instant>,
 }
 
@@ -53,6 +54,7 @@ impl MacOSRecorder {
                 temp_video_path: None,
                 temp_audio_path: None,
                 voice_handle: None,
+                webcam_overlay_config: None,
                 start_time: None,
             })),
             ffmpeg_path,
@@ -62,6 +64,9 @@ impl MacOSRecorder {
     /// Get available screen capture devices via FFmpeg device list
     fn get_screen_devices(ffmpeg_path: &PathBuf) -> Result<Vec<(String, String)>, RecordingError> {
         info!("Discovering screen devices via FFmpeg device list...");
+
+        // First, get actual display names from system_profiler
+        let display_names = Self::get_display_names();
 
         // Run: ffmpeg -f avfoundation -list_devices true -i ""
         let output = Command::new(ffmpeg_path)
@@ -82,7 +87,7 @@ impl MacOSRecorder {
 
         // Parse lines like:
         // [AVFoundation indev @ ...] AVFoundation video devices:
-        // [AVFoundation indev @ ...] [6] Capture screen 0
+        // [AVFoundation indev @ ...] [4] Capture screen 0
         for line in stderr.lines() {
             if line.contains("AVFoundation video devices:") {
                 in_video_section = true;
@@ -99,8 +104,19 @@ impl MacOSRecorder {
                         let id = after[..close].trim();
                         let name = after[close + 2..].trim();
                         if name.starts_with("Capture screen") {
-                            info!("Found screen device: [{}] {}", id, name);
-                            devices.push((id.to_string(), name.to_string()));
+                            // Extract screen index from "Capture screen 0" -> 0
+                            let screen_idx = name.trim_start_matches("Capture screen")
+                                .trim()
+                                .parse::<usize>()
+                                .unwrap_or(0);
+
+                            // Map to actual display name
+                            let display_name = display_names.get(screen_idx)
+                                .map(|s| s.as_str())
+                                .unwrap_or(name);
+
+                            info!("Found screen device: [{}] {} -> {}", id, name, display_name);
+                            devices.push((id.to_string(), display_name.to_string()));
                         }
                     }
                 }
@@ -109,10 +125,44 @@ impl MacOSRecorder {
 
         if devices.is_empty() {
             warn!("No 'Capture screen' devices detected via FFmpeg; falling back to default");
-            return Ok(vec![("0".to_string(), "Capture screen 0".to_string())]);
+            return Ok(vec![("4".to_string(), "Main Display".to_string())]);
         }
 
         Ok(devices)
+    }
+
+    /// Get display names from system_profiler
+    fn get_display_names() -> Vec<String> {
+        let output = Command::new("system_profiler")
+            .arg("SPDisplaysDataType")
+            .arg("-json")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output();
+
+        if let Ok(output) = output {
+            if let Ok(json_str) = String::from_utf8(output.stdout) {
+                // Parse JSON to extract display names
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    if let Some(displays) = json["SPDisplaysDataType"].as_array() {
+                        if let Some(first_gpu) = displays.first() {
+                            if let Some(ndrvs) = first_gpu["spdisplays_ndrvs"].as_array() {
+                                return ndrvs.iter()
+                                    .filter_map(|display| {
+                                        let name = display["_name"].as_str()?;
+                                        let resolution = display["_spdisplays_pixels"].as_str().unwrap_or("");
+                                        Some(format!("{} ({})", name, resolution))
+                                    })
+                                    .collect();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback
+        vec![]
     }
 
     /// Get available webcam/camera devices via FFmpeg
@@ -167,26 +217,14 @@ impl MacOSRecorder {
                             continue;
                         }
 
-                        // Filter out common virtual cameras (OBS, Snap Camera, etc.)
-                        // Virtual cameras can cause issues and are typically not what users want
-                        let virtual_camera_patterns = [
-                            "Virtual Camera",
-                            "OBS Virtual",
-                            "Snap Camera",
-                            "ManyCam",
-                            "CamTwist",
-                            "e2eSoft",
-                            "SplitCam",
-                            "XSplit",
-                        ];
-
-                        let is_virtual = virtual_camera_patterns.iter().any(|pattern| device_name.contains(pattern));
-                        if is_virtual {
-                            info!("Skipping virtual camera device: [{}] {}", device_id, device_name);
+                        // Filter out OBS Virtual Camera - prefer real cameras
+                        // OBS Virtual Camera can interfere with real camera access
+                        if device_name.contains("OBS") && device_name.contains("Virtual") {
+                            info!("Skipping OBS Virtual Camera: [{}] {}", device_id, device_name);
                             continue;
                         }
 
-                        // Add physical webcam to list
+                        // Add real webcam devices only
                         info!("Found webcam device: [{}] {}", device_id, device_name);
                         devices.push((device_id.to_string(), device_name.to_string()));
                     }
@@ -273,11 +311,13 @@ impl MacOSRecorder {
     /// - webcam_id: Device ID for the webcam
     /// - config: Recording configuration (includes desired output framerate)
     /// - input_framerate: Framerate to request from the webcam hardware
+    /// - audio_device_id: Optional audio device ID (None for no audio, Some("0") for microphone, etc.)
     fn spawn_webcam_recording(
         &self,
         webcam_id: &str,
         config: &RecordingConfig,
         input_framerate: u32,
+        audio_device_id: Option<&str>,
     ) -> Result<Child, RecordingError> {
         info!("Spawning webcam recording process for device {} at {}fps input, {}fps output",
             webcam_id, input_framerate, config.fps);
@@ -293,22 +333,30 @@ impl MacOSRecorder {
         cmd.arg("-framerate").arg(input_framerate.to_string());
 
         // Input device (camera index:audio)
-        // For dual recording, webcam has NO audio (mic goes to screen)
-        let device_input = format!("{}:none", webcam_id);
+        // Format: "webcam_id:audio_id" or "webcam_id:none"
+        let device_input = if let Some(audio_id) = audio_device_id {
+            format!("{}:{}", webcam_id, audio_id)
+        } else {
+            format!("{}:none", webcam_id)
+        };
         info!("Spawning webcam recording with device ID: {} at {}fps input -> {}fps output",
-            webcam_id, input_framerate, config.fps);
-        eprintln!("[RECORDING] Spawning webcam recording process for device {} at {}fps input, {}fps output",
-            webcam_id, input_framerate, config.fps);
+            device_input, input_framerate, config.fps);
+        eprintln!("[RECORDING] Spawning webcam recording with device: {} at {}fps input -> {}fps output",
+            device_input, input_framerate, config.fps);
         cmd.arg("-i").arg(&device_input);
 
-        // Video codec
-        cmd.arg("-c:v").arg("libx264");
-        cmd.arg("-preset").arg("ultrafast"); // Real-time encoding
+        // Video codec - use VideoToolbox hardware encoder
+        cmd.arg("-c:v").arg("h264_videotoolbox");
 
-        // Quality (CRF scale: lower = better quality, 18=visually lossless, 23=good, 28=acceptable)
-        // Map quality 10 (best) -> CRF 18, quality 5 (medium) -> CRF 23, quality 1 (low) -> CRF 28
-        let crf = 18 + ((10 - config.quality) * 1);
-        cmd.arg("-crf").arg(crf.to_string());
+        // Bitrate for VideoToolbox (quality 10=best, 5=medium, 1=low)
+        // Map quality 10 -> 5 Mbps, quality 5 -> 3.5 Mbps, quality 1 -> 2 Mbps
+        let bitrate: u32 = 2000 + (config.quality as u32 * 300);
+        cmd.arg("-b:v").arg(format!("{}k", bitrate));
+
+        // Quality setting for VideoToolbox (0-100, higher = better)
+        // Lower quality = smaller file size. Quality 60-70 is good for webcam
+        let quality: u32 = 40 + (config.quality as u32 * 3);  // Quality 10 -> 70, quality 5 -> 55, quality 1 -> 43
+        cmd.arg("-q:v").arg(quality.to_string());
 
         // Pixel format for compatibility
         cmd.arg("-pix_fmt").arg("yuv420p");
@@ -326,8 +374,8 @@ impl MacOSRecorder {
         // Output path
         cmd.arg(config.output_path.to_str().unwrap());
 
-        // Redirect stderr to pipe (for error capture)
-        cmd.stderr(Stdio::piped());
+        // Use inherit for stderr to prevent pipe buffer issues
+        cmd.stderr(Stdio::inherit());
         cmd.stdout(Stdio::null());
 
         // Log the full command for debugging
@@ -526,7 +574,7 @@ impl ScreenRecorder for MacOSRecorder {
                     cmd.arg("-capture_cursor").arg("1");
                 }
 
-                cmd.arg("-framerate").arg(config.fps.to_string());
+                // Don't specify input framerate for screen capture - let it use native rate
 
                 // Use device ID directly (e.g., "6"), not the device name (e.g., "Capture screen 6")
                 let mut use_voice = false;
@@ -553,10 +601,16 @@ impl ScreenRecorder for MacOSRecorder {
                 cmd.arg("-analyzeduration").arg("0");
 
                 cmd.arg("-i").arg(&device_input);
-                cmd.arg("-c:v").arg("libx264");
-                cmd.arg("-preset").arg("ultrafast");  // Fastest encoding for real-time recording
 
-                cmd.arg("-crf").arg("23");  // Standard quality, same as composite
+                // Set output framerate (re-encode from native capture rate to desired FPS)
+                cmd.arg("-r").arg(config.fps.to_string());
+
+                cmd.arg("-c:v").arg("h264_videotoolbox");
+                cmd.arg("-b:v").arg("8000k");  // 8 Mbps target bitrate for VideoToolbox
+
+                // Quality setting for VideoToolbox (0-100, higher = better)
+                // Lower quality = smaller file size. Quality 50 gives ~6-8 Mbps for screen content
+                cmd.arg("-q:v").arg("50");  // Balanced quality for screen recording
 
                 if let Some(crop) = &config.crop_region {
                     let crop_filter = format!("crop={}:{}:{}:{}", crop.width, crop.height, crop.x, crop.y);
@@ -583,7 +637,8 @@ impl ScreenRecorder for MacOSRecorder {
                     cmd.arg(final_out.to_str().unwrap());
                     final_out.clone()
                 };
-                cmd.stderr(Stdio::piped());
+                // Use inherit for stderr to prevent pipe buffer from filling up and blocking the process
+                cmd.stderr(Stdio::inherit());
                 cmd.stdout(Stdio::null());
 
                 // Log the full command for debugging
@@ -593,11 +648,16 @@ impl ScreenRecorder for MacOSRecorder {
                 if use_voice {
                     let mut wav = video_out.clone();
                     wav.set_file_name("mic-voiceproc.wav");
-                    if let Ok(h) = start_voice_processing_capture(wav.clone(), 44100.0, 1) {
-                        state.temp_audio_path = Some(wav);
-                        state.voice_handle = Some(h);
-                    } else {
-                        warn!("Failed to start VoiceProcessing capture; continuing without it");
+                    info!("Starting Voice Processing audio capture to: {:?}", wav);
+                    match start_voice_processing_capture(wav.clone(), 44100.0, 1) {
+                        Ok(h) => {
+                            info!("✓ Voice Processing capture started successfully");
+                            state.temp_audio_path = Some(wav);
+                            state.voice_handle = Some(h);
+                        }
+                        Err(e) => {
+                            error!("Failed to start VoiceProcessing capture: {}; continuing without it", e);
+                        }
                     }
                 }
 
@@ -627,7 +687,7 @@ impl ScreenRecorder for MacOSRecorder {
 
                 let mut child = None;
                 for &fps in &framerates_to_try {
-                    if let Ok(c) = self.spawn_webcam_recording(webcam_id, &config, fps) {
+                    if let Ok(c) = self.spawn_webcam_recording(webcam_id, &config, fps, None) {
                         child = Some(c);
                         break;
                     }
@@ -650,6 +710,9 @@ impl ScreenRecorder for MacOSRecorder {
                 let webcam_source = config.webcam_source.as_ref()
                     .ok_or(RecordingError::InvalidConfig("Webcam source required for dual mode".into()))?;
 
+                info!("[DUAL MODE] Webcam source received: id={}, name={}", webcam_source.id(), webcam_source.name());
+                eprintln!("[DUAL MODE] Webcam source received: id={}, name={}", webcam_source.id(), webcam_source.name());
+
                 let webcam_path = config.webcam_output_path.as_ref()
                     .ok_or(RecordingError::InvalidConfig("Webcam output path required for dual mode".into()))?;
 
@@ -669,7 +732,7 @@ impl ScreenRecorder for MacOSRecorder {
                     screen_cmd.arg("-capture_cursor").arg("1");
                 }
 
-                screen_cmd.arg("-framerate").arg(config.fps.to_string());
+                // Don't specify input framerate for screen capture - let it use native rate
 
                 let mut use_voice_dual = false;
                 let device_input = match config.audio_input {
@@ -686,10 +749,16 @@ impl ScreenRecorder for MacOSRecorder {
                 screen_cmd.arg("-analyzeduration").arg("0");
 
                 screen_cmd.arg("-i").arg(&device_input);
-                screen_cmd.arg("-c:v").arg("libx264");
-                screen_cmd.arg("-preset").arg("ultrafast");  // Fastest encoding for real-time recording
 
-                screen_cmd.arg("-crf").arg("23");  // Standard quality, same as composite
+                // Set output framerate (re-encode from native capture rate to desired FPS)
+                screen_cmd.arg("-r").arg(config.fps.to_string());
+
+                screen_cmd.arg("-c:v").arg("h264_videotoolbox");
+                screen_cmd.arg("-b:v").arg("8000k");  // 8 Mbps target bitrate for VideoToolbox
+
+                // Quality setting for VideoToolbox (0-100, higher = better)
+                // Lower quality = smaller file size. Quality 50 gives ~6-8 Mbps for screen content
+                screen_cmd.arg("-q:v").arg("50");  // Balanced quality for screen recording
 
                 if !use_voice_dual && config.audio_input == AudioInputType::Microphone {
                     screen_cmd.arg("-ar").arg("44100");
@@ -711,7 +780,8 @@ impl ScreenRecorder for MacOSRecorder {
                     screen_cmd.arg(final_out.to_str().unwrap());
                     final_out.clone()
                 };
-                screen_cmd.stderr(Stdio::piped());
+                // Use inherit for stderr so FFmpeg output goes to parent naturally
+                screen_cmd.stderr(Stdio::inherit());
                 screen_cmd.stdout(Stdio::null());
 
                 // Log the full command for debugging
@@ -722,19 +792,42 @@ impl ScreenRecorder for MacOSRecorder {
                 if use_voice_dual {
                     let mut wav = video_out.clone();
                     wav.set_file_name("mic-voiceproc.wav");
-                    if let Ok(h) = start_voice_processing_capture(wav.clone(), 44100.0, 1) {
-                        state.temp_audio_path = Some(wav);
-                        state.voice_handle = Some(h);
-                    } else {
-                        warn!("Failed to start VoiceProcessing capture; continuing without it");
+                    info!("[DUAL MODE] Starting Voice Processing audio capture to: {:?}", wav);
+                    match start_voice_processing_capture(wav.clone(), 44100.0, 1) {
+                        Ok(h) => {
+                            info!("✓ [DUAL MODE] Voice Processing capture started successfully");
+                            state.temp_audio_path = Some(wav);
+                            state.voice_handle = Some(h);
+                        }
+                        Err(e) => {
+                            error!("[DUAL MODE] Failed to start VoiceProcessing capture: {}; continuing without it", e);
+                        }
                     }
                 }
 
-                let screen_child = screen_cmd.spawn()
+                let mut screen_child = screen_cmd.spawn()
                     .map_err(|e| {
                         eprintln!("[RECORDING ERROR] Failed to spawn screen FFmpeg: {}", e);
                         RecordingError::RecordingFailed(format!("Failed to start screen: {}", e))
                     })?;
+
+                // Health check: verify FFmpeg is still running after a brief moment
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                match screen_child.try_wait() {
+                    Ok(Some(status)) => {
+                        let error_msg = format!("Screen FFmpeg exited immediately with status: {}", status);
+                        error!("{}", error_msg);
+                        eprintln!("[RECORDING ERROR] {}", error_msg);
+                        return Err(RecordingError::RecordingFailed(error_msg));
+                    }
+                    Ok(None) => {
+                        info!("✓ Screen FFmpeg health check passed");
+                        eprintln!("[RECORDING] ✓ Screen FFmpeg health check passed");
+                    }
+                    Err(e) => {
+                        warn!("Failed to check screen FFmpeg status: {}", e);
+                    }
+                }
 
                 // Spawn webcam recording process (NO audio)
                 let mut webcam_config = config.clone();
@@ -766,6 +859,11 @@ impl ScreenRecorder for MacOSRecorder {
                 info!("Starting webcam recording: device_id={}, output={}", webcam_source.id(), webcam_path.display());
                 eprintln!("[WEBCAM] Starting webcam recording: device_id={}, output={}", webcam_source.id(), webcam_path.display());
 
+                // Wait for any preview capture processes to fully release the camera
+                // This prevents "Configuration of video device failed" errors
+                info!("Waiting 800ms for camera to be released from preview processes...");
+                std::thread::sleep(std::time::Duration::from_millis(800));
+
                 // Try multiple framerates with health check fallback
                 // Try user's requested framerate first, then common webcam framerates (60, 30, 15)
                 let desired_fps = config.fps as u32;
@@ -782,10 +880,17 @@ impl ScreenRecorder for MacOSRecorder {
                 let mut last_error = String::new();
 
                 for (attempt, &input_framerate) in framerates_to_try.iter().enumerate() {
+                    // Add delay between retry attempts to allow camera to reset
+                    if attempt > 0 {
+                        info!("Waiting 1000ms before retry attempt {}...", attempt + 1);
+                        eprintln!("[WEBCAM] Waiting 1000ms before retry attempt {}...", attempt + 1);
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                    }
+
                     info!("Webcam recording attempt {} with {}fps input", attempt + 1, input_framerate);
                     eprintln!("[WEBCAM] Attempt {} with {}fps input", attempt + 1, input_framerate);
 
-                    match self.spawn_webcam_recording(webcam_source.id(), &webcam_config, input_framerate) {
+                    match self.spawn_webcam_recording(webcam_source.id(), &webcam_config, input_framerate, None) {
                         Ok(mut child) => {
                             info!("Webcam process spawned successfully (PID: {:?})", child.id());
                             eprintln!("[WEBCAM] Process spawned successfully (PID: {:?})", child.id());
@@ -855,14 +960,24 @@ impl ScreenRecorder for MacOSRecorder {
                 let mut webcam_child = match webcam_child {
                     Some(child) => child,
                     None => {
-                        let error_msg = format!(
-                            "Failed to start webcam recording after trying {} framerate(s). Last error: {}",
-                            framerates_to_try.len(),
-                            last_error
+                        // Provide user-friendly error message with actionable advice
+                        let user_msg = if last_error.contains("Configuration of video device failed") {
+                            "Failed to access webcam - it may be in use by another application. Please close other apps using the camera and try again."
+                        } else if last_error.contains("framerate") {
+                            "Webcam doesn't support the requested framerate. Please try a different quality setting."
+                        } else {
+                            "Failed to start webcam recording. Please check that the camera is connected and not in use by another app."
+                        };
+
+                        let detailed_error = format!(
+                            "{}. Technical details: {} (tried {} framerate(s))",
+                            user_msg,
+                            last_error,
+                            framerates_to_try.len()
                         );
-                        error!("{}", error_msg);
-                        eprintln!("[WEBCAM ERROR] {}", error_msg);
-                        return Err(RecordingError::RecordingFailed(error_msg));
+                        error!("{}", detailed_error);
+                        eprintln!("[WEBCAM ERROR] {}", detailed_error);
+                        return Err(RecordingError::RecordingFailed(detailed_error));
                     }
                 };
 
@@ -871,6 +986,7 @@ impl ScreenRecorder for MacOSRecorder {
                 state.output_path = Some(config.output_path.clone());
                 if use_voice_dual { state.temp_video_path = Some(video_out); }
                 state.webcam_output_path = Some(webcam_path.clone());
+                state.webcam_overlay_config = config.webcam_overlay_config.clone();
 
                 eprintln!("[RECORDING] Dual recording fully initialized - screen: {:?}, webcam: {:?}",
                     state.process.as_ref().map(|p| p.id()),
@@ -907,6 +1023,7 @@ impl ScreenRecorder for MacOSRecorder {
         // Get webcam process if it exists (for dual recording)
         let webcam_process = state.webcam_process.take();
         let webcam_output_path = state.webcam_output_path.take();
+        let webcam_overlay_config = state.webcam_overlay_config.take();
 
         // VoiceProcessing temp artifacts (if used)
         let temp_video_path = state.temp_video_path.take();
@@ -938,29 +1055,29 @@ impl ScreenRecorder for MacOSRecorder {
             let _ = process.kill();
         }
 
-        // Now read stderr and wait for process to exit
-        let mut stderr_output = String::new();
-        if let Some(mut stderr) = process.stderr.take() {
-            use std::io::Read;
-            let _ = stderr.read_to_string(&mut stderr_output);
-        }
-
-        // Wait for process to exit
-        let wait_result = process.wait();
-
-        // Log stderr BEFORE checking file (helps debug immediate failures)
-        if !stderr_output.is_empty() {
-            info!("FFmpeg stderr output ({} bytes): {}", stderr_output.len(), stderr_output);
-        } else {
-            warn!("FFmpeg produced no stderr output (this may indicate immediate failure)");
-        }
-
-        match wait_result {
-            Ok(status) => {
-                info!("Recording stopped, exit status: {}", status);
-            }
-            Err(e) => {
-                warn!("Error waiting for recording process: {}", e);
+        // Wait for process to exit with timeout (max 5 seconds)
+        let mut waited = 0;
+        loop {
+            match process.try_wait() {
+                Ok(Some(status)) => {
+                    info!("Recording stopped, exit status: {}", status);
+                    break;
+                }
+                Ok(None) => {
+                    // Process still running
+                    if waited >= 50 {  // 50 * 100ms = 5 seconds
+                        warn!("Screen recording process did not exit after 5s, force killing");
+                        let _ = process.kill();
+                        let _ = process.wait();  // Clean up zombie
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    waited += 1;
+                }
+                Err(e) => {
+                    warn!("Error waiting for recording process: {}", e);
+                    break;
+                }
             }
         }
 
@@ -974,60 +1091,45 @@ impl ScreenRecorder for MacOSRecorder {
                 libc::kill(webcam_process.id() as i32, libc::SIGINT);
             }
 
-            // Read stderr for debugging - ALWAYS capture and log it
-            let mut webcam_stderr = String::new();
-            if let Some(mut stderr) = webcam_process.stderr.take() {
-                use std::io::Read;
-                let _ = stderr.read_to_string(&mut webcam_stderr);
-            }
-
-            // Wait for process to exit and check status
+            // Wait for process to exit with timeout (max 5 seconds)
             // Note: FFmpeg returns exit code 255 when gracefully stopped via SIGINT - this is NORMAL
-            let webcam_status = match webcam_process.wait() {
-                Ok(status) => {
-                    // Check if this is a graceful shutdown (exit code 255 after SIGINT)
-                    let is_graceful_shutdown = status.code() == Some(255);
-
-                    if status.success() || is_graceful_shutdown {
-                        info!("Webcam process exited successfully: {:?}", status);
-                        eprintln!("[WEBCAM] Process exited successfully: {:?}", status);
-                    } else {
-                        error!("Webcam process exited with unexpected error status: {}. FFmpeg stderr: {}",
-                            status,
-                            if webcam_stderr.is_empty() { "No output" } else { &webcam_stderr });
-                        eprintln!("[WEBCAM ERROR] Process failed with status: {}. FFmpeg stderr: {}",
-                            status,
-                            if webcam_stderr.is_empty() { "No output" } else { &webcam_stderr });
+            let mut webcam_waited = 0;
+            loop {
+                match webcam_process.try_wait() {
+                    Ok(Some(status)) => {
+                        let is_graceful_shutdown = status.code() == Some(255);
+                        if status.success() || is_graceful_shutdown {
+                            info!("Webcam process exited successfully: {:?}", status);
+                            eprintln!("[WEBCAM] Process exited successfully: {:?}", status);
+                        } else {
+                            error!("Webcam process exited with unexpected error status: {}", status);
+                            eprintln!("[WEBCAM ERROR] Process failed with status: {}", status);
+                        }
+                        break;
                     }
-                    Some(status)
-                }
-                Err(e) => {
-                    error!("Error waiting for webcam process: {}", e);
-                    eprintln!("[WEBCAM ERROR] Failed to wait for process: {}", e);
-                    None
-                }
-            };
-
-            // Always log stderr if present, even on success (may contain warnings)
-            if !webcam_stderr.is_empty() {
-                warn!("Webcam FFmpeg stderr output ({} bytes): {}",
-                    webcam_stderr.len(),
-                    webcam_stderr);
-                eprintln!("[WEBCAM] FFmpeg stderr ({} bytes): {}",
-                    webcam_stderr.len(),
-                    webcam_stderr);
-            } else if let Some(status) = webcam_status {
-                // Check if process failed unexpectedly (not exit code 255)
-                let is_graceful_shutdown = status.code() == Some(255);
-                if !status.success() && !is_graceful_shutdown {
-                    error!("Webcam process failed but produced no stderr output (process may have crashed)");
-                    eprintln!("[WEBCAM ERROR] Process failed with no stderr (possible crash)");
+                    Ok(None) => {
+                        // Process still running
+                        if webcam_waited >= 50 {  // 50 * 100ms = 5 seconds
+                            warn!("Webcam process did not exit after 5s, force killing");
+                            eprintln!("[WEBCAM] Process did not exit after 5s, force killing");
+                            let _ = webcam_process.kill();
+                            let _ = webcam_process.wait();  // Clean up zombie
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        webcam_waited += 1;
+                    }
+                    Err(e) => {
+                        error!("Error waiting for webcam process: {}", e);
+                        eprintln!("[WEBCAM ERROR] Failed to wait for process: {}", e);
+                        break;
+                    }
                 }
             }
         }
 
         // Verify webcam file if it was being recorded
-        if let Some(webcam_path) = webcam_output_path {
+        if let Some(ref webcam_path) = webcam_output_path {
             for attempt in 0..5 {
                 if webcam_path.exists() && webcam_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
                     info!("Webcam recording file verified: {:?}", webcam_path);
@@ -1045,7 +1147,18 @@ impl ScreenRecorder for MacOSRecorder {
         if let Some(h) = voice_handle {
             h.stop();
             if let (Some(video_no_audio), Some(wav_path)) = (temp_video_path.as_ref(), temp_audio_path.as_ref()) {
+                // Verify audio file exists and has content
+                if let Ok(metadata) = std::fs::metadata(wav_path) {
+                    log::info!("Voice Processing WAV file size: {} bytes", metadata.len());
+                    if metadata.len() == 0 {
+                        log::error!("Voice Processing WAV file is empty!");
+                    }
+                } else {
+                    log::error!("Voice Processing WAV file not found at: {:?}", wav_path);
+                }
+
                 // Mux: copy video, encode audio to AAC (Apple AAC)
+                log::info!("Muxing video with Voice Processing audio...");
                 let mut mux = Command::new(&self.ffmpeg_path);
                 mux.args([
                     "-i", video_no_audio.to_str().unwrap(),
@@ -1058,7 +1171,22 @@ impl ScreenRecorder for MacOSRecorder {
                     "-y",
                     output_path.to_str().unwrap(),
                 ]);
-                let _ = mux.status();
+                mux.stderr(std::process::Stdio::piped());
+
+                match mux.output() {
+                    Ok(output) => {
+                        if output.status.success() {
+                            log::info!("Successfully muxed video with audio");
+                        } else {
+                            log::error!("FFmpeg muxing failed with status: {:?}", output.status);
+                            log::error!("FFmpeg stderr: {}", String::from_utf8_lossy(&output.stderr));
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to execute FFmpeg muxing command: {}", e);
+                    }
+                }
+
                 // Clean up temp files
                 let _ = std::fs::remove_file(video_no_audio);
                 let _ = std::fs::remove_file(wav_path);
@@ -1115,6 +1243,77 @@ impl ScreenRecorder for MacOSRecorder {
                 return Err(RecordingError::RecordingFailed(format!(
                     "Cannot verify recording file: {}", e
                 )));
+            }
+        }
+
+        // If we have both screen and webcam recordings, composite them
+        if let (Some(webcam_path), Some(config)) = (webcam_output_path.as_ref(), webcam_overlay_config.as_ref()) {
+            info!("Compositing screen and webcam recordings...");
+            info!("  Screen: {:?}", output_path);
+            info!("  Webcam: {:?}", webcam_path);
+
+            // Verify webcam file exists and has content
+            match std::fs::metadata(webcam_path) {
+                Ok(metadata) if metadata.len() > 0 => {
+                    info!("Webcam file verified: {} bytes", metadata.len());
+
+                    // Create composite output path (replace screen recording with composite)
+                    let composite_path = output_path.with_file_name(
+                        format!("{}-composite.mp4",
+                            output_path.file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("recording"))
+                    );
+
+                    // Import FFmpegService to use composite_webcam
+                    use crate::ffmpeg::FFmpegService;
+                    let ffmpeg_service = match FFmpegService::new() {
+                        Ok(service) => service,
+                        Err(e) => {
+                            error!("Failed to create FFmpegService: {}", e);
+                            warn!("Returning screen recording without composite");
+                            return Ok(output_path);
+                        }
+                    };
+
+                    // Call composite_webcam
+                    match tokio::runtime::Runtime::new()
+                        .unwrap()
+                        .block_on(ffmpeg_service.composite_webcam(
+                            &output_path,
+                            webcam_path,
+                            &composite_path,
+                            config,
+                            None, // No progress callback during stop
+                            temp_audio_path.as_deref(), // Pass audio path if it exists
+                        )) {
+                        Ok(_) => {
+                            info!("Composite created successfully: {:?}", composite_path);
+
+                            // Clean up original screen and webcam files
+                            if let Err(e) = std::fs::remove_file(&output_path) {
+                                warn!("Failed to remove screen recording: {}", e);
+                            }
+                            if let Err(e) = std::fs::remove_file(webcam_path) {
+                                warn!("Failed to remove webcam recording: {}", e);
+                            }
+
+                            // Return composite path
+                            return Ok(composite_path);
+                        }
+                        Err(e) => {
+                            error!("Failed to composite recordings: {}", e);
+                            warn!("Returning screen recording without composite");
+                            // Fall through to return screen recording
+                        }
+                    }
+                }
+                Ok(_) => {
+                    warn!("Webcam file is empty, skipping composite");
+                }
+                Err(e) => {
+                    warn!("Webcam file not found or inaccessible: {}", e);
+                }
             }
         }
 

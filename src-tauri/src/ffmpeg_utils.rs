@@ -2,83 +2,44 @@ use std::path::PathBuf;
 
 /// Get the FFmpeg executable path
 ///
-/// This function first checks for a system-installed FFmpeg (which has full feature support),
-/// then falls back to the bundled minimal FFmpeg binary if no system FFmpeg is found.
-///
-/// The bundled minimal FFmpeg has limited functionality and may not support all input formats
-/// (notably, AVFoundation on macOS is disabled in the minimal build).
+/// This function uses the bundled FFmpeg binary which is statically linked and includes
+/// all necessary features for ClipForge (screen capture, encoding, filtering).
 ///
 /// # Returns
-/// - `Ok(PathBuf)`: Path to ffmpeg binary (system or bundled)
+/// - `Ok(PathBuf)`: Path to ffmpeg binary
 /// - `Err(String)`: Error message if no FFmpeg binary can be located
 pub fn find_ffmpeg_path() -> Result<PathBuf, String> {
-    // First, try to find system FFmpeg which has full feature support
-    #[cfg(target_os = "macos")]
-    {
-        // Common macOS locations for Homebrew FFmpeg
-        let system_paths = vec![
-            PathBuf::from("/opt/homebrew/bin/ffmpeg"), // Apple Silicon Homebrew
-            PathBuf::from("/usr/local/bin/ffmpeg"),    // Intel Homebrew
-        ];
-
-        for path in system_paths {
-            if path.exists() {
-                log::info!("Using system FFmpeg at: {:?}", path);
-                return Ok(path);
-            }
-        }
-    }
-
-    // Fall back to bundled minimal FFmpeg
+    // Use bundled FFmpeg (statically linked with all features)
     let ffmpeg_path = get_bundled_binary_path("ffmpeg")?;
 
     // Verify the binary exists and is executable
     if !ffmpeg_path.exists() {
         return Err(format!(
-            "No FFmpeg binary found. Please install FFmpeg via Homebrew: brew install ffmpeg\nAttempted paths:\n  - /opt/homebrew/bin/ffmpeg\n  - /usr/local/bin/ffmpeg\n  - {:?}",
+            "Bundled FFmpeg binary not found at: {:?}",
             ffmpeg_path
         ));
     }
 
-    log::warn!("Using bundled minimal FFmpeg (limited features). Install system FFmpeg for full functionality: brew install ffmpeg");
-    log::info!("Bundled FFmpeg at: {:?}", ffmpeg_path);
+    log::info!("Using bundled FFmpeg at: {:?}", ffmpeg_path);
     Ok(ffmpeg_path)
 }
 
 /// Get the bundled FFprobe executable path
 ///
-/// This function first checks for a system-installed FFprobe, then falls back to the bundled
-/// FFprobe binary. In development mode, it also checks the src-tauri/binaries directory.
+/// This function uses the bundled FFprobe binary which is statically linked.
 /// FFprobe is used for extracting metadata from media files.
 ///
 /// # Returns
-/// - `Ok(PathBuf)`: Path to the ffprobe binary (system or bundled)
+/// - `Ok(PathBuf)`: Path to the ffprobe binary
 /// - `Err(String)`: Error message if the binary cannot be located
 pub fn find_ffprobe_path() -> Result<PathBuf, String> {
-    // First, try to find system FFprobe
-    #[cfg(target_os = "macos")]
-    {
-        // Common macOS locations for Homebrew FFprobe
-        let system_paths = vec![
-            PathBuf::from("/opt/homebrew/bin/ffprobe"), // Apple Silicon Homebrew
-            PathBuf::from("/usr/local/bin/ffprobe"),    // Intel Homebrew
-        ];
-
-        for path in system_paths {
-            if path.exists() {
-                log::info!("Using system FFprobe at: {:?}", path);
-                return Ok(path);
-            }
-        }
-    }
-
-    // Fall back to bundled FFprobe
+    // Use bundled FFprobe (statically linked)
     let ffprobe_path = get_bundled_binary_path("ffprobe")?;
 
     // Verify the binary exists
     if !ffprobe_path.exists() {
         return Err(format!(
-            "No FFprobe binary found. Please install FFmpeg via Homebrew: brew install ffmpeg\nAttempted paths:\n  - /opt/homebrew/bin/ffprobe\n  - /usr/local/bin/ffprobe\n  - {:?}",
+            "Bundled FFprobe binary not found at: {:?}",
             ffprobe_path
         ));
     }

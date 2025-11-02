@@ -56,6 +56,8 @@ impl SubtitleService {
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))  // 5 minute timeout
+            .pool_max_idle_per_host(1)  // Limit connection pooling
+            .tcp_keepalive(Some(std::time::Duration::from_secs(60)))  // Keep connections alive
             .build()?;
 
         Ok(Self {
@@ -388,36 +390,81 @@ impl SubtitleService {
             .and_then(|n| n.to_str())
             .unwrap_or("audio.mp3");
 
-        // Build multipart form
-        let file_part = multipart::Part::bytes(audio_bytes)
-            .file_name(file_name.to_string())
-            .mime_str("audio/mpeg")?;
+        // Store language as reference to avoid moving it
+        // (We'll clone audio_bytes in the retry loop instead of using it here)
 
-        let mut form = multipart::Form::new()
-            .part("file", file_part)
-            .text("model", "whisper-1")
-            .text("response_format", "verbose_json")  // Get segments with timing
-            .text("timestamp_granularities[]", "segment");
+        // Make API request with retry logic for connection errors
+        let max_retries = 3;
+        let mut last_error = None;
+        let mut verbose_response: Option<WhisperVerboseResponse> = None;
 
-        if let Some(lang) = language {
-            form = form.text("language", lang);
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                let backoff_secs = 2u64.pow(attempt as u32);  // Exponential backoff: 2s, 4s, 8s
+                warn!("Retrying transcription API call (attempt {}/{}) after {}s backoff...",
+                      attempt + 1, max_retries, backoff_secs);
+                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+            }
+
+            // Rebuild form for each retry (multipart forms cannot be cloned)
+            let file_part = multipart::Part::bytes(audio_bytes.clone())
+                .file_name(file_name.to_string())
+                .mime_str("audio/mpeg")?;
+
+            let mut retry_form = multipart::Form::new()
+                .part("file", file_part)
+                .text("model", "whisper-1")
+                .text("response_format", "verbose_json")
+                .text("timestamp_granularities[]", "segment");
+
+            if let Some(ref lang) = language {
+                retry_form = retry_form.text("language", lang.clone());
+            }
+
+            match self.client
+                .post("https://api.openai.com/v1/audio/transcriptions")
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .multipart(retry_form)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        let error_text = response.text().await?;
+                        error!("OpenAI API error: {}", error_text);
+                        return Err(SubtitleError::ApiError(error_text));
+                    }
+
+                    match response.json().await {
+                        Ok(json) => {
+                            info!("Transcription succeeded on attempt {}", attempt + 1);
+                            verbose_response = Some(json);
+                            break;  // Success! Exit retry loop
+                        },
+                        Err(e) => {
+                            error!("Failed to parse API response: {}", e);
+                            last_error = Some(format!("Failed to parse API response: {}", e));
+                            continue;  // Retry on JSON parse error
+                        }
+                    }
+                },
+                Err(e) => {
+                    error!("API request failed (attempt {}): {}", attempt + 1, e);
+                    last_error = Some(format!("HTTP request error: {}", e));
+                    if attempt == max_retries - 1 {
+                        // Final attempt failed, return the error
+                        return Err(SubtitleError::ApiError(last_error.unwrap()));
+                    }
+                    // Otherwise continue to next retry
+                }
+            }
         }
 
-        // Make API request
-        let response = self.client
-            .post("https://api.openai.com/v1/audio/transcriptions")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .multipart(form)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            error!("OpenAI API error: {}", error_text);
-            return Err(SubtitleError::ApiError(error_text));
-        }
-
-        let verbose_response: WhisperVerboseResponse = response.json().await?;
+        // Extract response or return error if all retries failed
+        let verbose_response = verbose_response
+            .ok_or_else(|| SubtitleError::ApiError(
+                last_error.unwrap_or_else(|| "All retry attempts failed".to_string())
+            ))?;
 
         // Convert to SubtitleSegment format with sequential 1-based IDs
         let segments = verbose_response.segments

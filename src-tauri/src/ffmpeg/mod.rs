@@ -105,9 +105,9 @@ impl FFmpegService {
             "-ss", &start_time.to_string(),  // Seek to start
             "-i", input_str,                  // Input file
             "-t", &duration.to_string(),      // Duration
-            "-c:v", "libx264",                // Video codec
-            "-crf", "23",                     // Quality (0-51, lower is better)
-            "-preset", "medium",              // Encoding speed
+            "-c:v", "h264_videotoolbox",      // Video codec (VideoToolbox hardware encoder)
+            "-b:v", "5000k",                  // Bitrate
+            "-q:v", "65",                     // Quality (0-100, higher is better)
             "-af", "afade=t=in:st=0:d=0.01,afade=t=out:d=0.01,aresample=async=1:first_pts=0", // Audio filter: micro-fades to prevent boundary clicks, async resampling
             "-ar", "48000",                   // Standardize to 48kHz
             "-c:a", "aac",                    // Audio codec
@@ -310,7 +310,8 @@ impl FFmpegService {
     /// Composite webcam overlay onto screen recording
     ///
     /// Takes two separate video files (screen and webcam) and composites them
-    /// using FFmpeg overlay filters based on the provided configuration
+    /// using FFmpeg overlay filters based on the provided configuration.
+    /// Optionally includes a separate audio file if provided (for Voice Processing audio).
     pub async fn composite_webcam(
         &self,
         screen_path: &Path,
@@ -318,6 +319,7 @@ impl FFmpegService {
         output: &Path,
         config: &crate::recording::WebcamOverlayConfig,
         progress_callback: Option<ProgressCallback>,
+        audio_path: Option<&Path>,
     ) -> FFmpegResult<()> {
         use crate::recording::WebcamPosition;
 
@@ -386,24 +388,44 @@ impl FFmpegService {
         log::debug!("Using filter_complex: {}", complete_filter);
 
         let mut cmd = Command::new(&self.ffmpeg_path);
-        cmd.args([
-            "-i", screen_str,                   // [0:v] Screen recording
-            "-i", webcam_str,                   // [1:v] Webcam recording
-            "-filter_complex", &complete_filter,
-            "-map", "[out]",                    // Map composited video
-            "-map", "0:a:0",                    // Map first audio stream from screen recording
-            "-c:v", "libx264",                  // Video codec
-            "-preset", "fast",                  // Encoding speed
-            "-crf", "23",                       // Quality
-            "-af", "aresample=async=1:first_pts=0", // Audio filter: async resampling to fix timestamp drift
-            "-ar", "48000",                     // Standardize to 48kHz
-            "-c:a", "aac",                      // Re-encode audio to AAC for browser compatibility
-            "-aac_coder", "twoloop",            // Best AAC encoder method
-            "-b:a", "256k",                     // Higher bitrate for native AAC encoder quality
-            "-ac", "2",                         // Stereo audio
-            "-y",                               // Overwrite output
-            temp_output_str,
-        ]);
+
+        // Add inputs: screen, webcam, and optional audio file
+        cmd.arg("-i").arg(screen_str);         // [0] Screen recording (video only or video+audio)
+        cmd.arg("-i").arg(webcam_str);         // [1] Webcam recording
+
+        // Determine audio mapping based on whether separate audio file is provided
+        let audio_map = if let Some(audio) = audio_path {
+            if audio.exists() {
+                let audio_str = audio.to_str()
+                    .ok_or_else(|| FFmpegError::IoError(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Audio path contains invalid UTF-8"
+                    )))?;
+                cmd.arg("-i").arg(audio_str);  // [2] Separate audio file
+                log::info!("Including separate audio file: {:?}", audio);
+                "2:a:0"  // Map audio from third input (the separate audio file)
+            } else {
+                log::warn!("Separate audio file provided but does not exist: {:?}", audio);
+                "0:a:0"  // Fallback to screen audio
+            }
+        } else {
+            "0:a:0"  // Map audio from screen recording (default)
+        };
+
+        cmd.arg("-filter_complex").arg(&complete_filter);
+        cmd.arg("-map").arg("[out]");          // Map composited video
+        cmd.arg("-map").arg(audio_map);         // Map audio from appropriate source
+        cmd.arg("-c:v").arg("h264_videotoolbox"); // Video codec (VideoToolbox hardware encoder)
+        cmd.arg("-b:v").arg("5000k");           // Bitrate
+        cmd.arg("-q:v").arg("65");              // Quality (0-100, higher is better)
+        cmd.arg("-af").arg("aresample=async=1:first_pts=0"); // Audio filter: async resampling to fix timestamp drift
+        cmd.arg("-ar").arg("48000");            // Standardize to 48kHz
+        cmd.arg("-c:a").arg("aac");             // Re-encode audio to AAC for browser compatibility
+        cmd.arg("-aac_coder").arg("twoloop");   // Best AAC encoder method
+        cmd.arg("-b:a").arg("256k");            // Higher bitrate for native AAC encoder quality
+        cmd.arg("-ac").arg("2");                // Stereo audio
+        cmd.arg("-y");                          // Overwrite output
+        cmd.arg(temp_output_str);
 
         log::info!("Executing FFmpeg composite command: {:?}", cmd);
 
@@ -457,6 +479,17 @@ impl FFmpegService {
             log::warn!("Failed to delete source webcam recording: {}", e);
         } else {
             log::info!("Deleted source webcam recording: {:?}", webcam_path);
+        }
+
+        // Clean up separate audio file if it was used
+        if let Some(audio) = audio_path {
+            if audio.exists() {
+                if let Err(e) = std::fs::remove_file(audio) {
+                    log::warn!("Failed to delete source audio file: {}", e);
+                } else {
+                    log::info!("Deleted source audio file: {:?}", audio);
+                }
+            }
         }
 
         log::info!("Composite complete: {:?}", output);

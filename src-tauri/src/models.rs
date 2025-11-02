@@ -249,7 +249,7 @@ impl ExportSettings {
     /// YouTube 1080p preset
     pub fn youtube_1080p() -> Self {
         Self {
-            video_codec: "libx264".to_string(),
+            video_codec: "h264_videotoolbox".to_string(),
             audio_codec: "aac".to_string(),
             video_bitrate: 8000,
             audio_bitrate: 192,
@@ -262,7 +262,7 @@ impl ExportSettings {
     /// Instagram post preset (1:1 square)
     pub fn instagram_post() -> Self {
         Self {
-            video_codec: "libx264".to_string(),
+            video_codec: "h264_videotoolbox".to_string(),
             audio_codec: "aac".to_string(),
             video_bitrate: 5000,
             audio_bitrate: 128,
@@ -275,7 +275,7 @@ impl ExportSettings {
     /// Twitter video preset
     pub fn twitter_video() -> Self {
         Self {
-            video_codec: "libx264".to_string(),
+            video_codec: "h264_videotoolbox".to_string(),
             audio_codec: "aac".to_string(),
             video_bitrate: 6000,
             audio_bitrate: 128,

@@ -145,7 +145,6 @@
         <h1>ClipForge</h1>
         <div class="subtitle-group">
           <p class="subtitle">Desktop Video Editor</p>
-          <p class="version">MVP</p>
         </div>
       </div>
       <div class="header-actions">

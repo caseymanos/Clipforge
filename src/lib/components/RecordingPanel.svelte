@@ -346,11 +346,14 @@
                 <label class="section-label">Select Webcam</label>
                 {#if $webcamSources.length > 0}
                   <div class="sources-grid">
-                    {#each $webcamSources as webcam}
+                    {#each $webcamSources as webcam, index}
                       <button
                         class="source-card"
                         class:selected={$selectedWebcam === webcam.id}
-                        on:click={() => selectedWebcam.set(webcam.id)}
+                        on:click={() => {
+                          console.log('[RecordingPanel] Webcam clicked:', { index, id: webcam.id, name: webcam.name });
+                          selectedWebcam.set(webcam.id);
+                        }}
                         disabled={$isRecording}
                       >
                         {#if webcam.preview_path}
