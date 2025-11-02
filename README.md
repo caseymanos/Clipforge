@@ -4,7 +4,9 @@
 
 ClipForge is a cross-platform video editing application that combines the performance of native Rust with the flexibility of a modern web UI. Edit videos, record your screen, and export professional content—all from a single, lightweight desktop app.
 
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/clipforge/clipforge)
+> **Note:** Currently optimized for **macOS Silicon (Apple M1/M2/M3)**. Windows and Linux support coming soon.
+
+[![Platform](https://img.shields.io/badge/platform-macOS%20Silicon-lightgrey)](https://github.com/clipforge/clipforge)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0--mvp-orange)](CHANGELOG.md)
 
@@ -55,10 +57,11 @@ ClipForge is a cross-platform video editing application that combines the perfor
 
 ## Installation
 
-### macOS
+### macOS Silicon (Apple M1/M2/M3)
 
 **Requirements:**
 - macOS 11.0 (Big Sur) or later
+- Apple Silicon Mac (M1, M2, or M3 chip)
 - FFmpeg (install via Homebrew)
 
 **Install FFmpeg:**
@@ -73,56 +76,27 @@ brew install ffmpeg
 4. Launch ClipForge from Applications
 5. Grant screen recording permissions when prompted (for screen capture feature)
 
+> **Intel Mac Users:** Windows and Linux builds (including Intel Mac support) are coming soon.
+
 ---
 
-### Windows
+### Windows (Coming Soon)
 
 **Requirements:**
 - Windows 10 or later
-- FFmpeg (bundled with installer - coming soon)
+- FFmpeg (bundled with installer)
 
-**Install ClipForge:**
-1. Download `ClipForge-setup.exe` from [Releases](https://github.com/clipforge/clipforge/releases)
-2. Run the installer
-3. Follow the installation wizard
-4. Launch ClipForge from Start Menu
+Windows support is planned for future releases.
 
 ---
 
-### Linux
+### Linux (Coming Soon)
 
 **Requirements:**
 - Ubuntu 20.04+ / Fedora 34+ / Arch Linux
 - FFmpeg (install via package manager)
 
-**Install FFmpeg:**
-
-**Ubuntu/Debian:**
-```bash
-sudo apt update
-sudo apt install ffmpeg
-```
-
-**Fedora:**
-```bash
-sudo dnf install ffmpeg
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S ffmpeg
-```
-
-**Install ClipForge:**
-1. Download `ClipForge.AppImage` from [Releases](https://github.com/clipforge/clipforge/releases)
-2. Make it executable:
-   ```bash
-   chmod +x ClipForge.AppImage
-   ```
-3. Run:
-   ```bash
-   ./ClipForge.AppImage
-   ```
+Linux support is planned for future releases.
 
 ---
 
@@ -196,22 +170,23 @@ Click **"Export"** (planned in UI), choose a preset (YouTube 1080p, Instagram, T
 
 ## System Requirements
 
-### Minimum
+### Current Release (macOS Silicon Only)
 
-- **CPU:** Dual-core processor (Intel Core i3 or equivalent)
+**Minimum:**
+- **CPU:** Apple M1 chip or later (M1, M2, M3)
 - **RAM:** 8 GB
 - **Storage:** 500 MB for app + space for projects and exports
-- **OS:** macOS 11.0+ / Windows 10+ / Ubuntu 20.04+
+- **OS:** macOS 11.0 (Big Sur) or later
 - **FFmpeg:** Version 4.0 or later
 
-### Recommended
-
-- **CPU:** Quad-core processor (Intel Core i5 / AMD Ryzen 5 or better)
+**Recommended:**
+- **CPU:** Apple M2 or M3 chip
 - **RAM:** 16 GB
 - **Storage:** SSD with 50 GB+ free space
-- **GPU:** Dedicated graphics card (for better preview performance)
-- **OS:** macOS 12.0+ / Windows 11 / Ubuntu 22.04+
+- **OS:** macOS 12.0 (Monterey) or later
 - **FFmpeg:** Latest version (6.0+)
+
+> **Note:** Intel Mac, Windows, and Linux support coming in future releases.
 
 ---
 
