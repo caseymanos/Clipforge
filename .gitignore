@@ -53,3 +53,15 @@ src-tauri/Cargo.lock
 app-data/
 thumbnails/
 exports/
+
+# Internal documentation (not for public repo)
+/CLAUDE.md
+/clipforges/
+
+# Git worktrees
+/worktrees/
+
+# Database journal files
+*.db-journal
+*.db-shm
+*.db-wal

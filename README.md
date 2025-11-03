@@ -4,9 +4,9 @@
 
 ClipForge is a cross-platform video editing application that combines the performance of native Rust with the flexibility of a modern web UI. Edit videos, record your screen, and export professional content—all from a single, lightweight desktop app.
 
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/clipforge/clipforge)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/caseymanos/Clipforge)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0--mvp-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.0--mvp-orange)](https://github.com/caseymanos/Clipforge/releases)
 
 ---
 
@@ -67,7 +67,7 @@ brew install ffmpeg
 ```
 
 **Install ClipForge:**
-1. Download `ClipForge.dmg` from [Releases](https://github.com/clipforge/clipforge/releases)
+1. Download `ClipForge.dmg` from [Releases](https://github.com/caseymanos/Clipforge/releases)
 2. Open the DMG file
 3. Drag ClipForge to your Applications folder
 4. Launch ClipForge from Applications
@@ -82,7 +82,7 @@ brew install ffmpeg
 - FFmpeg (bundled with installer - coming soon)
 
 **Install ClipForge:**
-1. Download `ClipForge-setup.exe` from [Releases](https://github.com/clipforge/clipforge/releases)
+1. Download `ClipForge-setup.exe` from [Releases](https://github.com/caseymanos/Clipforge/releases)
 2. Run the installer
 3. Follow the installation wizard
 4. Launch ClipForge from Start Menu
@@ -114,7 +114,7 @@ sudo pacman -S ffmpeg
 ```
 
 **Install ClipForge:**
-1. Download `ClipForge.AppImage` from [Releases](https://github.com/clipforge/clipforge/releases)
+1. Download `ClipForge.AppImage` from [Releases](https://github.com/caseymanos/Clipforge/releases)
 2. Make it executable:
    ```bash
    chmod +x ClipForge.AppImage
@@ -165,15 +165,13 @@ Click **"Export"** (planned in UI), choose a preset (YouTube 1080p, Instagram, T
 - [Keyboard Shortcuts](docs/keyboard-shortcuts.md) - Speed up your workflow
 
 🛠 **Developer Docs:**
-- [Technical Architecture](clipforges/02-technical-architecture.md) - System design
-- [Module Specifications](clipforges/) - Detailed implementation docs
-- [API Reference](docs/api-reference.md) - Tauri command reference
 - [Contributing Guide](CONTRIBUTING.md) - How to contribute
+- [Code of Conduct](CODE_OF_CONDUCT.md) - Community guidelines
+- [Security Policy](SECURITY.md) - Security vulnerability reporting
 
 📊 **Project Status:**
-- [Progress Tracker](progress.md) - Current implementation status (80% complete)
-- [Audit Report](AUDIT_REPORT.md) - Comprehensive code audit
 - [Performance Results](docs/performance-results.md) - Benchmark data
+- [Releases](https://github.com/caseymanos/Clipforge/releases) - Download and changelog
 
 ---
 
@@ -268,7 +266,7 @@ See [docs/performance-results.md](docs/performance-results.md) for detailed benc
 
 ```bash
 # Clone the repository
-git clone https://github.com/clipforge/clipforge.git
+git clone https://github.com/caseymanos/Clipforge.git
 cd clipforge
 
 # Install dependencies
@@ -281,7 +279,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-See [CLAUDE.md](CLAUDE.md) for detailed development instructions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development instructions.
 
 ---
 
@@ -323,8 +321,8 @@ For more issues, see [docs/troubleshooting.md](docs/troubleshooting.md)
 We welcome contributions! ClipForge is open for community involvement.
 
 **Ways to contribute:**
-- 🐛 [Report bugs](https://github.com/clipforge/clipforge/issues)
-- 💡 [Suggest features](https://github.com/clipforge/clipforge/issues)
+- 🐛 [Report bugs](https://github.com/caseymanos/Clipforge/issues)
+- 💡 [Suggest features](https://github.com/caseymanos/Clipforge/issues)
 - 📝 Improve documentation
 - 💻 Submit pull requests
 
@@ -383,9 +381,8 @@ Inspired by professional video editors like Adobe Premiere, DaVinci Resolve, and
 
 ## Support
 
-- 📧 Email: support@clipforge.dev (if applicable)
-- 💬 Discussions: [GitHub Discussions](https://github.com/clipforge/clipforge/discussions)
-- 🐛 Bug Reports: [GitHub Issues](https://github.com/clipforge/clipforge/issues)
+- 💬 Discussions: [GitHub Discussions](https://github.com/caseymanos/Clipforge/discussions)
+- 🐛 Bug Reports: [GitHub Issues](https://github.com/caseymanos/Clipforge/issues)
 - 📚 Documentation: [docs/](docs/)
 
 ---
@@ -398,4 +395,4 @@ Inspired by professional video editors like Adobe Premiere, DaVinci Resolve, and
 
 **Made with ❤️ by the ClipForge team**
 
-[Website](https://clipforge.dev) | [GitHub](https://github.com/clipforge/clipforge) | [Documentation](docs/) | [Releases](https://github.com/clipforge/clipforge/releases)
+[GitHub](https://github.com/caseymanos/Clipforge) | [Documentation](docs/) | [Releases](https://github.com/caseymanos/Clipforge/releases)
