@@ -1,5 +1,7 @@
 # ClipForge API Reference
 
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux are not supported.
+
 **Tauri Command Reference for Frontend Developers**
 
 Version: 0.1.0 (MVP)

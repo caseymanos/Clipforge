@@ -1,5 +1,7 @@
 # ClipForge FAQ (Frequently Asked Questions)
 
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux are not supported.
+
 **Common questions about ClipForge video editor**
 
 Version: 0.1.0 (MVP)
@@ -19,7 +21,7 @@ ClipForge is a free, open-source desktop video editor built with Rust and Svelte
 - Multi-format support (MP4, MOV, WebM, AVI, MKV)
 - Fast export with FFmpeg
 - Project save/load
-- Cross-platform (macOS, Windows, Linux)
+- macOS (Apple Silicon) only
 
 ---
 
@@ -44,7 +46,7 @@ ClipForge is a free, open-source desktop video editor built with Rust and Svelte
 | **Timeline Editing** | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
 | **Effects** | 🟡 Basic | ✅ Advanced | ✅ Advanced | ✅ Basic |
 | **Export Presets** | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
-| **Cross-Platform** | ✅ Yes | ✅ Yes | ✅ Yes | ❌ macOS only |
+| **Cross-Platform** | ❌ macOS (Apple Silicon) only | ✅ Yes | ✅ Yes | ❌ macOS only |
 | **Learning Curve** | Easy | Hard | Medium | Easy |
 | **Performance** | Fast (Rust) | Good | Good | Good |
 
@@ -61,14 +63,10 @@ ClipForge is a free, open-source desktop video editor built with Rust and Svelte
 ### What platforms does ClipForge support?
 
 **Supported:**
-- ✅ **macOS** 11.0+ (Big Sur and later)
-- ✅ **Windows** 10+ (with planned installer)
-- ✅ **Linux** Ubuntu 20.04+, Fedora 34+, Arch Linux
+- ✅ **macOS** 11.0+ (Apple Silicon only)
 
 **Tested on:**
-- macOS 14 Sonoma (primary development platform)
-- Windows 11
-- Ubuntu 22.04 LTS
+- macOS 14 Sonoma (Apple Silicon)
 
 ---
 
@@ -83,21 +81,7 @@ ClipForge is a free, open-source desktop video editor built with Rust and Svelte
 brew install ffmpeg
 ```
 
-**Windows:**
-- FFmpeg bundling planned for v1.0
-- Manual installation: [ffmpeg.org/download.html](https://ffmpeg.org/download.html)
-
-**Linux:**
-```bash
-# Ubuntu/Debian
-sudo apt install ffmpeg
-
-# Fedora
-sudo dnf install ffmpeg
-
-# Arch
-sudo pacman -S ffmpeg
-```
+Note: Windows and Linux are not supported.
 
 **Why FFmpeg?**
 - Industry-standard video processing

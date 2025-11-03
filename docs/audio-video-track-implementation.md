@@ -1,5 +1,7 @@
 # Audio/Video Independent Track Implementation
 
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux are not supported.
+
 **Date:** 2025-10-28
 **Status:** Phase 1 Complete - Basic functionality working
 

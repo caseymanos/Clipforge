@@ -2,9 +2,11 @@
 
 **A fast, modern desktop video editor built with Rust and Svelte**
 
-ClipForge is a cross-platform video editing application that combines the performance of native Rust with the flexibility of a modern web UI. Edit videos, record your screen, and export professional content—all from a single, lightweight desktop app.
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows, Linux, and Intel Macs are not supported.
 
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/caseymanos/Clipforge)
+ClipForge is a macOS (Apple Silicon) desktop video editing application that combines the performance of native Rust with the flexibility of a modern web UI. Edit videos, record your screen, and export professional content—all from a single, lightweight desktop app.
+
+[![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)%20-only-blue)](https://github.com/caseymanos/Clipforge)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0--mvp-orange)](https://github.com/caseymanos/Clipforge/releases)
 
@@ -24,7 +26,7 @@ ClipForge is a cross-platform video editing application that combines the perfor
 - Multi-track support (video, audio, overlay)
 
 📹 **Screen Recording**
-- Built-in screen capture (macOS supported, Windows/Linux coming soon)
+- Built-in screen capture (macOS supported)
 - Auto-import recorded videos to timeline
 - Permission management
 
@@ -43,7 +45,6 @@ ClipForge is a cross-platform video editing application that combines the perfor
 💾 **Project Management**
 - Save and load complete projects (.cfp format)
 - JSON-based project files
-- Cross-platform compatibility
 
 🚀 **Fast Export**
 - Powered by FFmpeg
@@ -55,10 +56,11 @@ ClipForge is a cross-platform video editing application that combines the perfor
 
 ## Installation
 
-### macOS
+### macOS (Apple Silicon only)
 
 **Requirements:**
 - macOS 11.0 (Big Sur) or later
+- Apple Silicon (M1/M2/M3)
 - FFmpeg (install via Homebrew)
 
 **Install FFmpeg:**
@@ -75,56 +77,7 @@ brew install ffmpeg
 
 ---
 
-### Windows
-
-**Requirements:**
-- Windows 10 or later
-- FFmpeg (bundled with installer - coming soon)
-
-**Install ClipForge:**
-1. Download `ClipForge-setup.exe` from [Releases](https://github.com/caseymanos/Clipforge/releases)
-2. Run the installer
-3. Follow the installation wizard
-4. Launch ClipForge from Start Menu
-
----
-
-### Linux
-
-**Requirements:**
-- Ubuntu 20.04+ / Fedora 34+ / Arch Linux
-- FFmpeg (install via package manager)
-
-**Install FFmpeg:**
-
-**Ubuntu/Debian:**
-```bash
-sudo apt update
-sudo apt install ffmpeg
-```
-
-**Fedora:**
-```bash
-sudo dnf install ffmpeg
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S ffmpeg
-```
-
-**Install ClipForge:**
-1. Download `ClipForge.AppImage` from [Releases](https://github.com/caseymanos/Clipforge/releases)
-2. Make it executable:
-   ```bash
-   chmod +x ClipForge.AppImage
-   ```
-3. Run:
-   ```bash
-   ./ClipForge.AppImage
-   ```
-
----
+Windows and Linux are currently not supported.
 
 ## Quick Start
 
@@ -196,10 +149,10 @@ Click **"Export"** (planned in UI), choose a preset (YouTube 1080p, Instagram, T
 
 ### Minimum
 
-- **CPU:** Dual-core processor (Intel Core i3 or equivalent)
+- **CPU:** Apple Silicon (M1 or newer)
 - **RAM:** 8 GB
 - **Storage:** 500 MB for app + space for projects and exports
-- **OS:** macOS 11.0+ / Windows 10+ / Ubuntu 20.04+
+- **OS:** macOS 11.0+ (Apple Silicon only)
 - **FFmpeg:** Version 4.0 or later
 
 ### Recommended
@@ -208,7 +161,7 @@ Click **"Export"** (planned in UI), choose a preset (YouTube 1080p, Instagram, T
 - **RAM:** 16 GB
 - **Storage:** SSD with 50 GB+ free space
 - **GPU:** Dedicated graphics card (for better preview performance)
-- **OS:** macOS 12.0+ / Windows 11 / Ubuntu 22.04+
+- **OS:** macOS 12.0+ (Apple Silicon only)
 - **FFmpeg:** Latest version (6.0+)
 
 ---
@@ -221,7 +174,7 @@ Click **"Export"** (planned in UI), choose a preset (YouTube 1080p, Instagram, T
 - ✅ Module 1: Application Shell (100%)
 - ✅ Module 2: File System & Media (100%)
 - ✅ Module 3: FFmpeg Integration (100%)
-- ✅ Module 4: Screen Recording (100% macOS, Windows/Linux stubs)
+- ✅ Module 4: Screen Recording (macOS only)
 - ✅ Module 5: Timeline Engine (95%)
 - ✅ Module 6: Export & Rendering (100%)
 - ✅ Module 7: Timeline UI (95%)
@@ -230,7 +183,7 @@ Click **"Export"** (planned in UI), choose a preset (YouTube 1080p, Instagram, T
 **Remaining Work:**
 - Performance profiling and optimization
 - Keyboard shortcuts
-- Cross-platform testing (Windows/Linux)
+- macOS polish and stability
 - FFmpeg bundling strategy
 - User documentation (in progress)
 
@@ -291,8 +244,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development instructions.
 
 **Solution:**
 - **macOS:** `brew install ffmpeg`
-- **Windows:** Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH
-- **Linux:** `sudo apt install ffmpeg` (Ubuntu) or equivalent
 
 ### Screen recording permission denied (macOS)
 

@@ -1,5 +1,7 @@
 # ClipForge User Guide
 
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux are not supported.
+
 **Complete guide to using ClipForge desktop video editor**
 
 Version: 0.1.0 (MVP)
@@ -34,7 +36,7 @@ ClipForge is a modern desktop video editor designed for speed, simplicity, and p
 
 - **Fast:** Built with Rust for native performance
 - **Non-Destructive:** Your original files are never modified
-- **Cross-Platform:** Works on macOS, Windows, and Linux
+- **Platform:** macOS (Apple Silicon) only
 - **Open Source:** Free and customizable
 - **Lightweight:** Small app size, minimal system requirements
 
@@ -83,7 +85,7 @@ ffmpeg -version
 
 ### First Launch
 
-1. Open ClipForge from Applications (macOS) or Start Menu (Windows)
+1. Open ClipForge from Applications (macOS)
 2. You'll see three main sections:
    - **Media Library** (top)
    - **Video Preview** (middle)

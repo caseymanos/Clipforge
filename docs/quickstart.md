@@ -1,5 +1,7 @@
 # ClipForge Quickstart Tutorial
 
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux are not supported.
+
 **Get started with ClipForge in 5 minutes**
 
 This tutorial walks you through creating your first video project, from importing clips to exporting the final video.
@@ -22,7 +24,7 @@ This tutorial walks you through creating your first video project, from importin
 - ✅ 2-3 sample video clips (MP4, MOV, or WebM)
 
 **Don't have sample videos?**
-- Record your screen with QuickTime (macOS) or Xbox Game Bar (Windows)
+- Record your screen with QuickTime (macOS)
 - Download free stock videos from [Pexels](https://www.pexels.com/videos/) or [Pixabay](https://pixabay.com/videos/)
 
 ---
@@ -36,16 +38,6 @@ This tutorial walks you through creating your first video project, from importin
    - Media Library (top)
    - Video Preview (middle)
    - Timeline Editor (bottom)
-
-### Windows
-1. Click **Start menu**
-2. Search for "ClipForge"
-3. Click to launch
-
-### Linux
-```bash
-./ClipForge.AppImage
-```
 
 **First launch:** App may take a few seconds to initialize.
 
@@ -69,7 +61,7 @@ This tutorial walks you through creating your first video project, from importin
 
 ### Method 2: Drag-and-Drop *(Planned)*
 
-1. Open Finder (macOS) or File Explorer (Windows)
+1. Open Finder (macOS)
 2. Select video files
 3. Drag files into Media Library section
 4. Release to drop

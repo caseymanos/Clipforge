@@ -1,5 +1,7 @@
 # ClipForge Performance Profiling Results
 
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux are not supported.
+
 **Date:** October 28, 2025
 **Version:** v0.1.0 (MVP)
 **Platform:** macOS 14.6 (Darwin 24.6.0)

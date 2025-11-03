@@ -1,5 +1,7 @@
 # ClipForge Keyboard Shortcuts
 
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux are not supported.
+
 **Speed up your editing workflow with keyboard shortcuts**
 
 Version: 0.1.0 (MVP)

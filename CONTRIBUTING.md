@@ -1,5 +1,7 @@
 # Contributing to ClipForge
 
+Note: The main branch currently targets macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux builds are not supported for end users at this time.
+
 Thank you for your interest in contributing to ClipForge! We welcome contributions from the community.
 
 ## Code of Conduct
@@ -50,9 +52,10 @@ Use the feature request template when creating a new issue.
    # Install FFmpeg (required)
    # macOS:
    brew install ffmpeg
-   # Ubuntu/Debian:
+   # Note: Windows/Linux commands below are for historical reference; the main branch is macOS (Apple Silicon) only
+   # Ubuntu/Debian (not supported target):
    sudo apt install ffmpeg
-   # Windows:
+   # Windows (not supported target):
    # Download from https://ffmpeg.org/download.html
    ```
 
@@ -162,8 +165,7 @@ npm run tauri build
 
 # Output location:
 # macOS: src-tauri/target/release/bundle/dmg/
-# Windows: src-tauri/target/release/bundle/msi/
-# Linux: src-tauri/target/release/bundle/appimage/
+# Windows/Linux paths listed for reference only; these platforms are not supported in the main branch
 ```
 
 ## Architecture Guidelines

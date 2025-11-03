@@ -1,5 +1,7 @@
 # ClipForge Troubleshooting Guide
 
+Note: ClipForge currently supports macOS on Apple Silicon (M1/M2/M3) only. Windows and Linux are not supported.
+
 **Common issues and solutions for ClipForge video editor**
 
 Version: 0.1.0 (MVP)
