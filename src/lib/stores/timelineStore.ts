@@ -296,8 +296,8 @@ export async function splitClipAtPlayhead(): Promise<{ firstClipId: string; seco
         throw new Error(`Playhead must be within the clip bounds (${clipStart.toFixed(2)}s - ${clipEnd.toFixed(2)}s). Current position: ${currentPlayhead.toFixed(2)}s`);
     }
 
-    // Calculate split time relative to clip start
-    const splitTime = currentPlayhead - clipStart;
+    // Use absolute timeline position for split time (backend expects absolute position)
+    const splitTime = currentPlayhead;
 
     // Optimistic UI update
     const previousState = await getTimelineState();

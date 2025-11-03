@@ -163,7 +163,7 @@ impl ExportService {
         }
 
         // Build filter_complex for timeline (returns temp files to cleanup)
-        let (filter_complex, temp_files) = self.build_filter_complex(timeline, &input_map, media_files)?;
+        let (filter_complex, temp_files) = self.build_filter_complex(timeline, settings, &input_map, media_files)?;
 
         info!("Generated filter_complex ({} bytes): {}", filter_complex.len(),
             if filter_complex.len() > 500 {
@@ -227,6 +227,7 @@ impl ExportService {
     fn build_filter_complex(
         &self,
         timeline: &Timeline,
+        settings: &ExportSettings,
         input_map: &HashMap<String, usize>,
         _media_files: &HashMap<String, MediaFile>,
     ) -> Result<(String, Vec<PathBuf>), ExportError> {
@@ -335,10 +336,15 @@ impl ExportService {
                             format!("[{}:v]", input_idx)
                         };
 
-                        // Trim and scale clip
+                        // Trim, normalize resolution, and prepare clip
+                        // Scale to target resolution while preserving aspect ratio, then pad with black bars
+                        let target_width = settings.resolution.width;
+                        let target_height = settings.resolution.height;
                         let mut clip_filter = format!(
-                            "{}trim=start={}:duration={},setpts=PTS-STARTPTS",
-                            source_stream, clip.trim_start, clip.duration
+                            "{}trim=start={}:duration={},setpts=PTS-STARTPTS,scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2:black",
+                            source_stream, clip.trim_start, clip.duration,
+                            target_width, target_height,
+                            target_width, target_height
                         );
 
                         // Apply effects
